@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" role="img" aria-label="Demo eyewear illustration">
+  <defs><linearGradient id="lens" x2=".7" y2="1"><stop stop-color="#39434a" stop-opacity=".65"/><stop offset="1" stop-color="#39434a"/></linearGradient><filter id="shadow"><feGaussianBlur stdDeviation="12"/></filter></defs>
+  <rect width="640" height="480" fill="#faf8f6"/>
+  <ellipse cx="320" cy="344" rx="225" ry="17" fill="#3d3040" opacity=".12" filter="url(#shadow)"/>
+  <g stroke="#263c45" stroke-linejoin="round" stroke-linecap="round" fill="none">
+  <path d="M92 212 L135 148 Q145 132 162 140 L257 175 M548 212 L505 148 Q495 132 478 140 L383 175" stroke-width="12"/>
+  <path d="M279 235 Q320 208 361 235" stroke-width="11"/>
+  <rect x="92" y="199" width="189" height="126" rx="55" ry="83" fill="url(#lens)" stroke-width="12"/>
+  <rect x="359" y="199" width="189" height="126" rx="55" ry="83" fill="url(#lens)" stroke-width="12"/>
+  <path d="M95 215 L77 212 M546 215 L563 212" stroke-width="10"/>
+  </g>
+  <path d="M127 249 Q151 220 190 219 M394 249 Q418 220 457 219" stroke="white" stroke-width="9" stroke-linecap="round" fill="none" opacity=".65"/>
+  </svg>
