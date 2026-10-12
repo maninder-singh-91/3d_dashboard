@@ -1605,6 +1605,9 @@ export default function App({
           }}
           onClose={() => setGenerationStartOpen(false)}
           onChoose={(source) => {
+            generationDispatch({ type: "begin-selection" });
+            setGenerationBatchFilter("");
+            setGenerationSearch("");
             setGenerationExistingProduct(undefined);
             setGenerationSource(source);
             setGenerationStartOpen(false);
@@ -1655,16 +1658,22 @@ export default function App({
           selected={generationSelected}
           batch={generationBatchFilter}
           query={generationSearch}
-          onBatch={setGenerationBatchFilter}
+          onBatch={(batch) => {
+            setGenerationBatchFilter(batch);
+            generationDispatch({ type: "begin-selection" });
+            setGenerationSearch("");
+          }}
           onQuery={setGenerationSearch}
           onToggle={toggleGenerationProduct}
           onRemove={(id) => generationDispatch({ type: "remove", id })}
           onClose={() => setGenerationSelectionOpen(false)}
           onProceed={() => {
-            if (!generationSelected.length) return;
+            if (!generationSelected.length || (generationSource === "catalog" && !generationBatchFilter)) return;
+            const batchProducts = products.filter(product => product.batchId === generationBatchFilter);
+            if (generationSource === "catalog" && generationSelected.some(product => product.batchId !== generationBatchFilter)) return;
             saveBatchModelGenerationSettings(generationSelected.map(product => product.id), generationBatchSettings);
             if (generationSource === "manual") generationDispatch({ type: "single", id: generationSelected[0].id, products });
-            else generationDispatch({ type: "proceed", products });
+            else generationDispatch({ type: "proceed", products: batchProducts });
             setGenerationSelectionOpen(false);
             navigate("3D Generation");
           }}

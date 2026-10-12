@@ -133,6 +133,7 @@ export default function GenerationSelectionModal({
       ]),
     ];
     return ids
+      .filter(id => !id.startsWith("manual-"))
       .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
       .map((id) => ({ value: id, label: `Batch ${id.replace(/^#/, "")}` }));
   }, [batches, products]);
@@ -152,9 +153,10 @@ export default function GenerationSelectionModal({
       return true;
     });
   }, [products, batch, manual]);
+  const catalogSelected = useMemo(() => batch ? selected.filter(product => product.batchId === batch) : [], [batch, selected]);
   const selectedSkus = useMemo(
-    () => new Set(selected.map(skuIdentity)),
-    [selected],
+    () => new Set(catalogSelected.map(skuIdentity)),
+    [catalogSelected],
   );
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -162,7 +164,7 @@ export default function GenerationSelectionModal({
       `${p.sku} ${p.name}`.toLowerCase().includes(term),
     );
   }, [batchProducts, query, selectedSkus]);
-  const atLimit = selected.length >= MAX_GENERATION_PRODUCTS;
+  const atLimit = catalogSelected.length >= MAX_GENERATION_PRODUCTS;
   const allAdded = batchProducts.length > 0 && batchProducts.every((p) => selectedSkus.has(skuIdentity(p)));
   return (
     <Modal
@@ -223,10 +225,10 @@ export default function GenerationSelectionModal({
               />
             )}
           </div>
-          {!manual && selected.length > 0 && <section className="generation-added-products" aria-label="Added products">
-            <header><h3>{manual ? "Uploaded products" : "Selected products"}</h3><span>{selected.length} / 15</span></header>
+          {!manual && catalogSelected.length > 0 && <section className="generation-added-products" aria-label="Added products">
+            <header><h3>{manual ? "Uploaded products" : "Selected products"}</h3><span>{catalogSelected.length} / 15</span></header>
             <div className="generation-added-thumbnails">
-              {selected.map(product => <div key={product.id}>
+              {catalogSelected.map(product => <div key={product.id}>
                 <ProductImage product={product} />
                 <span><strong>{product.name}</strong><small>{productDimensions(product)}</small></span>
                 <button type="button" className="icon-button" aria-label={`Remove ${product.name}, SKU ${product.sku}`} onClick={() => onRemove(product.id)}><Trash2 size={14} /></button>
@@ -294,7 +296,7 @@ export default function GenerationSelectionModal({
             <h3>Generation settings</h3>
             <GenerationSettingsFields value={settings} onChange={onSettingsChange} />
           </section>
-          <CreditSummary count={manual ? (imageCount ? 1 : 0) : selected.length} perProduct={generationCredits(settings)} />
+          <CreditSummary count={manual ? (imageCount ? 1 : 0) : catalogSelected.length} perProduct={generationCredits(settings)} />
         </section>
       </div>
       <footer className="generation-selection-footer">
@@ -305,7 +307,7 @@ export default function GenerationSelectionModal({
           className="button primary"
           disabled={
             uploading ||
-            (manual ? !imageCount : !selected.length || selected.length > MAX_GENERATION_PRODUCTS)
+            (manual ? !imageCount : !batch || !catalogSelected.length || catalogSelected.length > MAX_GENERATION_PRODUCTS)
           }
           onClick={manual ? undefined : () => { try { onProceed(); } catch { setUploadError("Settings could not be saved. Please try again."); } }}
         >
