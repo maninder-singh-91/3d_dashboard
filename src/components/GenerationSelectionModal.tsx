@@ -1,8 +1,7 @@
 import { memo, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Layers3, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Layers3, Trash2 } from "lucide-react";
 import type { Batch, Product } from "../lib/types";
 import {
-  calculateCredits,
   CREDITS_PER_PRODUCT,
   MAX_GENERATION_PRODUCTS,
   skuIdentity,
@@ -13,6 +12,9 @@ import ManualProductUpload from "./ManualProductUpload";
 import type { ManualProductInput } from "../lib/manualGeneration";
 import { productDimensions } from "../lib/productDimensions";
 import "../generation-selection.css";
+import "../generation-workspace.css";
+import GenerationSettingsFields from "./GenerationSettingsFields";
+import { generationCredits, type ModelGenerationSettings } from "../lib/modelGenerationSettings";
 
 const ProductSelectionRow = memo(function ProductSelectionRow({
   product,
@@ -51,17 +53,17 @@ const ProductSelectionRow = memo(function ProductSelectionRow({
   );
 });
 
-export function CreditSummary({ count }: { count: number }) {
+export function CreditSummary({ count, perProduct = CREDITS_PER_PRODUCT }: { count: number; perProduct?: number }) {
   return (
     <div className="generation-credit-summary">
       <h4>Generation Credits</h4>
       <div>
         <span>
-          {count} {count === 1 ? "product" : "products"} × {CREDITS_PER_PRODUCT}{" "}
+          {count} {count === 1 ? "product" : "products"} × {perProduct}{" "}
           credits
         </span>
         <span>
-          Total <strong>{calculateCredits(count)} credits</strong>
+          Total <strong>{Math.round(count * perProduct * 100) / 100} credits</strong>
         </span>
       </div>
     </div>
@@ -83,6 +85,9 @@ export default function GenerationSelectionModal({
   source = "catalog",
   onBack,
   onUpload,
+  settings,
+  onSettingsChange,
+  product,
 }: {
   products: Product[];
   batches: Batch[];
@@ -98,9 +103,13 @@ export default function GenerationSelectionModal({
   source?: "catalog" | "manual";
   onBack?: () => void;
   onUpload?: (products: ManualProductInput[]) => Promise<void>;
+  settings: ModelGenerationSettings;
+  onSettingsChange: (settings: ModelGenerationSettings) => void;
+  product?: Product;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [imageCount, setImageCount] = useState(0);
   const manual = source === "manual";
   async function upload(products: ManualProductInput[]) {
     if (!products.length || !onUpload || uploading) return false;
@@ -143,21 +152,22 @@ export default function GenerationSelectionModal({
       return true;
     });
   }, [products, batch, manual]);
-  const visible = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return batchProducts.filter((p) =>
-      `${p.sku} ${p.name}`.toLowerCase().includes(term),
-    );
-  }, [batchProducts, query]);
   const selectedSkus = useMemo(
     () => new Set(selected.map(skuIdentity)),
     [selected],
   );
+  const visible = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return batchProducts.filter((p) => !selectedSkus.has(skuIdentity(p)) &&
+      `${p.sku} ${p.name}`.toLowerCase().includes(term),
+    );
+  }, [batchProducts, query, selectedSkus]);
   const atLimit = selected.length >= MAX_GENERATION_PRODUCTS;
+  const allAdded = batchProducts.length > 0 && batchProducts.every((p) => selectedSkus.has(skuIdentity(p)));
   return (
     <Modal
-      title="Select Products"
-      subtitle="Choose up to 15 SKUs for your generation batch."
+      title={manual ? "Single Product Generation" : "Select Products"}
+      subtitle={manual ? undefined : "Choose up to 15 SKUs for your generation batch."}
       headerLeading={onBack && (
         <button
           type="button"
@@ -184,7 +194,7 @@ export default function GenerationSelectionModal({
           <div className="generation-selection-filters">
             {manual ? (
               <>
-                <ManualProductUpload busy={uploading} onUpload={upload} />
+                <ManualProductUpload key={product?.id || "new"} product={product} busy={uploading} onUpload={upload} formId="single-generation-upload" hideSubmit onFilesChange={setImageCount} />
                 {uploadError && (
                   <p role="alert" className="generation-upload-error">
                     {uploadError}
@@ -213,18 +223,22 @@ export default function GenerationSelectionModal({
               />
             )}
           </div>
+          {!manual && selected.length > 0 && <section className="generation-added-products" aria-label="Added products">
+            <header><h3>{manual ? "Uploaded products" : "Selected products"}</h3><span>{selected.length} / 15</span></header>
+            <div className="generation-added-thumbnails">
+              {selected.map(product => <div key={product.id}>
+                <ProductImage product={product} />
+                <span><strong>{product.name}</strong><small>{productDimensions(product)}</small></span>
+                <button type="button" className="icon-button" aria-label={`Remove ${product.name}, SKU ${product.sku}`} onClick={() => onRemove(product.id)}><Trash2 size={14} /></button>
+              </div>)}
+            </div>
+          </section>}
+          {!manual && <>
           <div className="generation-available-heading">
             <h3>
               Available Products <span>{visible.length}</span>
             </h3>
-            <div
-              className="generation-selection-counter"
-              role="status"
-              aria-live="polite"
-            >
-              Selected{" "}
-              <strong>{String(selected.length).padStart(2, "0")} / 15</strong>
-            </div>
+
           </div>
           <div
             className="generation-selection-list"
@@ -250,7 +264,7 @@ export default function GenerationSelectionModal({
                       ? "Select a batch to view products."
                       : !batchProducts.length
                         ? "No products available in this batch."
-                        : "No products match your search."}
+                        : allAdded ? "All products have been added." : "No products match your search."}
                 </h4>
                 <p>
                   {manual && !batchProducts.length
@@ -259,7 +273,7 @@ export default function GenerationSelectionModal({
                       ? "Choose a batch from the dropdown above."
                       : !batchProducts.length
                         ? "Choose another batch to find products."
-                        : "Try another SKU or product name."}
+                        : allAdded ? "Remove an added product to select it again." : "Try another SKU or product name."}
                 </p>
               </div>
             )}
@@ -273,59 +287,29 @@ export default function GenerationSelectionModal({
                 ? "Maximum 15 products selected. Remove one to add another."
                 : "Select a row or checkbox to add a product."}
           </p>
+          </>}
         </section>
-        <section className="generation-queue" aria-label="AI Generation queue">
-          <header>
-            <span className="generation-queue-icon">
-              <Sparkles size={19} />
-            </span>
-            <div>
-              <h3>AI Generation Queue</h3>
-            </div>
-          </header>
-          <div className="generation-selected-list">
-            {selected.length ? (
-              selected.map((product) => (
-                <div className="generation-selected-row" key={product.id}>
-                  <ProductImage product={product} />
-                  <span className="generation-product-copy">
-                    <strong>{product.name}</strong>
-                    <small>SKU {product.sku}</small>
-                  </span>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Remove ${product.name}, SKU ${product.sku}`}
-                    title="Remove from queue"
-                    onClick={() => onRemove(product.id)}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))
-            ) : (
-              <div className="generation-selection-empty">
-                <Sparkles size={28} />
-                <h4>Your generation queue is empty</h4>
-                <p>Select products on the left to add them here.</p>
-              </div>
-            )}
-          </div>
-          <CreditSummary count={selected.length} />
+        <section className="generation-settings-column" aria-label="Generation settings">
+          <section className="generation-inline-settings generation-model-settings">
+            <h3>Generation settings</h3>
+            <GenerationSettingsFields value={settings} onChange={onSettingsChange} />
+          </section>
+          <CreditSummary count={manual ? (imageCount ? 1 : 0) : selected.length} perProduct={generationCredits(settings)} />
         </section>
       </div>
       <footer className="generation-selection-footer">
-        <span>1.5 credits per SKU</span>
+        <span>{generationCredits(settings)} credits per SKU</span>
         <button
+          type={manual ? "submit" : "button"}
+          form={manual ? "single-generation-upload" : undefined}
           className="button primary"
           disabled={
             uploading ||
-            !selected.length ||
-            selected.length > MAX_GENERATION_PRODUCTS
+            (manual ? !imageCount : !selected.length || selected.length > MAX_GENERATION_PRODUCTS)
           }
-          onClick={onProceed}
+          onClick={manual ? undefined : () => { try { onProceed(); } catch { setUploadError("Settings could not be saved. Please try again."); } }}
         >
-          Next <ArrowRight size={16} />
+          Generate <ArrowRight size={16} />
         </button>
       </footer>
     </Modal>

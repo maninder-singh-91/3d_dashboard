@@ -3,6 +3,7 @@ import type { Product, Status } from "./types";
 import { statuses } from "./types";
 import { team } from "./seed";
 import { validUrl } from "./workflow";
+import { requiresUnpublished } from "./productStatus";
 export function newProduct(values: Partial<Product>): Product {
   const now = new Date().toISOString();
   return {
@@ -18,6 +19,7 @@ export function newProduct(values: Partial<Product>): Product {
     batchId: "024",
     reviewStatus: "Not submitted",
     reviewComment: "",
+    reviewCycleCount: ["In Review", "Submitted"].includes(values.status || "") ? 1 : 0,
     modelUrl: "",
     createdAt: now,
     updatedAt: now,
@@ -29,6 +31,7 @@ export function newProduct(values: Partial<Product>): Product {
     checklist: Array(10).fill(false),
     activity: [{ text: "Product imported and made available.", at: now }],
     ...values,
+    consoleStatus: requiresUnpublished(values.status || "Available") ? "Draft" : values.consoleStatus || "Draft",
   };
 }
 // Replace this adapter with a server-side extraction service when connected.

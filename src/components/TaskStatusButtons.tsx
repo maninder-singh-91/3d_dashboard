@@ -16,7 +16,7 @@ export default function TaskStatusButtons({ product, role, userId, busy, onChang
       const active = current === label;
       return <button key={value} type="button" aria-pressed={active}
         className={`task-status-option${active ? ` status-${value.toLowerCase().replaceAll(" ", "-")}` : ""}`}
-        disabled={busy || !editable || (value === "Available" && role !== "Admin / Manager" && !active)}
+        disabled={busy || product.singleProductDraft || !editable || (value === "Available" && role !== "Admin / Manager" && !active)}
         onClick={() => { if (!active) onChange(value); }}>
         <span className="task-status-dot" aria-hidden="true" />{label}
       </button>;

@@ -2,10 +2,19 @@ import { describe, expect, it } from "vitest";
 import { newProduct } from "./imports";
 import {
   calculateCredits,
+  generationDisplayStatus,
+  generationDisplayProgress,
   emptyGenerationSelection,
   generationSelectionReducer as reduce,
   selectedProducts,
 } from "./generationSelection";
+
+it("uses the same queue status in the card and viewer until a result is available", () => {
+  expect(generationDisplayStatus(undefined, 0)).toBe("In Queue");
+  expect(generationDisplayStatus(undefined, 3)).toBe("In Queue");
+  expect(generationDisplayStatus({ status: "Generating" }, 0)).toBe("In progress");
+  expect(generationDisplayStatus({ status: "Completed", outputUrl: "/model.glb" }, 0)).toBe("Completed");
+});
 
 const products = Array.from({ length: 20 }, (_, i) => ({
   ...newProduct({
@@ -23,6 +32,27 @@ function select(count: number) {
   return state;
 }
 describe("Generation selection flow", () => {
+  it("keeps submitted products out of a fresh queue when returning to selection", () => {
+    let state = reduce(select(2), { type: "proceed", products });
+    state = reduce(state, { type: "begin-selection" });
+    expect(state.selectedProductIds).toEqual([]);
+    expect(state.batchProductIds).toEqual(["p-0", "p-1"]);
+    expect(reduce(state, { type: "toggle", id: "p-0", products })).toBe(state);
+    state = reduce(state, { type: "toggle", id: "p-2", products });
+    expect(state.selectedProductIds).toEqual(["p-2"]);
+    state = reduce(state, { type: "proceed", products });
+    expect(state.submittedProductIds).toEqual(["p-0", "p-1", "p-2"]);
+    expect(reduce(state, { type: "toggle", id: "p-0", products })).toBe(state);
+  });
+  it("opens the current single product in generation while retaining previous results", () => {
+    const state = { ...select(2), results: { "p-1": { status: "Ready" as const } } };
+    const next = reduce(state, { type: "single", id: "p-3", products });
+    expect(next.selectedProductIds).toEqual([]);
+    expect(next.batchProductIds).toEqual(["p-3"]);
+    expect(next.activeProductId).toBe("p-3");
+    expect(next.results).toEqual({ ...state.results, "p-3": { status: "In Queue" } });
+    expect(reduce(state, { type: "single", id: "missing", products })).toBe(state);
+  });
   it("calculates credits for empty, one, five, fourteen and fifteen products", () => {
     expect([0, 1, 5, 14, 15].map(calculateCredits)).toEqual([
       0, 1.5, 7.5, 21, 22.5,
@@ -71,7 +101,7 @@ describe("Generation selection flow", () => {
     expect(state.batchProductIds).toEqual(expected);
     state = reduce(state, { type: "open", id: "p-4" });
     expect(state.activeProductId).toBe("p-4");
-    expect(state.selectedProductIds).toEqual(expected);
+    expect(state.selectedProductIds).toEqual([]);
   });
   it("does not submit zero products or open a product outside the generation batch", () => {
     expect(
@@ -84,7 +114,7 @@ describe("Generation selection flow", () => {
     const state = reduce(select(5), { type: "proceed", products });
     const draft = reduce(state, { type: "remove", id: "p-0" });
     expect(draft.batchProductIds).toEqual(state.batchProductIds);
-    expect(draft.selectedProductIds).toHaveLength(4);
+    expect(draft.selectedProductIds).toHaveLength(0);
   });
   it("ignores deleted products and never mutates the catalog", () => {
     const before = structuredClone(products);
@@ -124,4 +154,36 @@ describe("Generation selection flow", () => {
     });
     expect(state.results["p-0"].status).toBe("Completed");
   });
+});
+
+it("cancels only queued generations and makes that product selectable again", () => {
+  const state = { ...emptyGenerationSelection, batchProductIds: ["p-0", "p-1", "p-2"], submittedProductIds: ["p-0", "p-1", "p-2"], activeProductId: "p-0" };
+  const canceled = reduce(state, { type: "cancel", id: "p-0" });
+  expect(canceled.batchProductIds).toEqual(["p-1", "p-2"]);
+  expect(canceled.submittedProductIds).not.toContain("p-0");
+  expect(canceled.activeProductId).toBeNull();
+  expect(canceled.results["p-1"].status).toBe("Generating");
+  expect(reduce(canceled, { type: "cancel", id: "p-1" })).toBe(canceled);
+  expect(reduce(canceled, { type: "toggle", id: "p-0", products }).selectedProductIds).toContain("p-0");
+});
+it("refuses to cancel a started or completed generation", () => {
+  for (const status of ["Generating", "Completed", "Ready", "Failed", "Needs attention"] as const) {
+    const state = { ...emptyGenerationSelection, batchProductIds: ["p-0"], results: { "p-0": { status } } };
+    expect(reduce(state, { type: "cancel", id: "p-0" })).toBe(state);
+  }
+});
+it("starts a new single-product run in queue even if it has an old result", () => {
+  const next = reduce({ ...emptyGenerationSelection, results: { "p-0": { status: "Completed", outputUrl: "/old.glb" } } }, { type: "single", id: "p-0", products });
+  expect(next.results["p-0"]).toEqual({ status: "In Queue" });
+});
+
+it("shares actual or illustrative generation progress between the card and viewport", () => {
+  expect(generationDisplayProgress(undefined, 1)).toBe(45);
+  expect(generationDisplayProgress(undefined, 0)).toBeUndefined();
+  expect(generationDisplayProgress({ status: "Generating", progress: 62 }, 0)).toBe(62);
+  expect(generationDisplayProgress({ status: "Generating" }, 0)).toBeUndefined();
+  expect(generationDisplayProgress({ status: "Generating", progress: 140 }, 0)).toBe(100);
+  expect(generationDisplayProgress({ status: "Generating", progress: NaN }, 0)).toBeUndefined();
+  const state = { ...emptyGenerationSelection, batchProductIds: ["p-0"], results: { "p-0": { status: "Generating" as const, progress: 10 } } };
+  expect(reduce(state, { type: "result", id: "p-0", result: { status: "Generating", progress: 30 } }).results["p-0"].progress).toBe(30);
 });

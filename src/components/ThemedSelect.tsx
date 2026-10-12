@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 
@@ -26,6 +26,7 @@ export default function ThemedSelect({
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLUListElement>(null);
   const search = useRef({ text: "", at: 0 });
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -33,6 +34,32 @@ export default function ThemedSelect({
     0,
     options.findIndex((option) => option.value === value),
   );
+  useLayoutEffect(() => {
+    if (!open || !menu.current) return;
+    const list = menu.current;
+    list.showPopover();
+    const position = () => {
+      if (!trigger.current) return;
+      const rect = trigger.current.getBoundingClientRect();
+      const gap = 6;
+      const edge = 8;
+      const below = window.innerHeight - rect.bottom - gap - edge;
+      const above = rect.top - gap - edge;
+      list.style.width = `${Math.min(rect.width, window.innerWidth - edge * 2)}px`;
+      list.style.maxHeight = `${Math.max(0, Math.max(above, below))}px`;
+      const height = list.getBoundingClientRect().height;
+      list.style.top = `${below >= height || below >= above ? rect.bottom + gap : Math.max(edge, rect.top - gap - height)}px`;
+      list.style.left = `${Math.max(edge, Math.min(rect.left, window.innerWidth - list.getBoundingClientRect().width - edge))}px`;
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+      if (list.matches(":popover-open")) list.hidePopover();
+    };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
@@ -144,6 +171,8 @@ export default function ThemedSelect({
       </button>
       {open && (
         <ul
+          ref={menu}
+          popover="manual"
           id={id}
           role="listbox"
           aria-label={label}

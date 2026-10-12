@@ -5,9 +5,11 @@ import "../generation-selection.css";
 export default function GenerationStartModal({
   onChoose,
   onClose,
+  onQueue,
 }: {
   onChoose: (source: "catalog" | "manual") => void;
   onClose: () => void;
+  onQueue: () => void;
 }) {
   return (
     <Modal
@@ -38,6 +40,9 @@ export default function GenerationStartModal({
           </span>
         </button>
       </div>
+      <footer className="generation-start-footer">
+        <button type="button" className="button primary" onClick={onQueue}>Go to Generation Queue <ArrowRight size={17} /></button>
+      </footer>
     </Modal>
   );
 }

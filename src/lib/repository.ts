@@ -3,6 +3,9 @@ import { seed } from "./seed";
 import { transition, type Action } from "./workflow";
 import { saveModelFile, removeModelFile } from "./modelFiles";
 import { LOCAL_MODEL_PREFIX } from "./modelReference";
+import { requiresUnpublished } from "./productStatus";
+import { navigationKey } from "./workspaceNavigation";
+import { generationNotificationKey } from "./generationNotifications";
 const LEGACY_KEY = "modello.workspace.v1";
 function workspaceKey() {
   let organisation = "GLAMAR";
@@ -22,12 +25,32 @@ export interface ProductRepository {
   ): Promise<void>;
   update(id: string, action: Action, userId: string, role: Role): Promise<void>;
   remove(id: string, role: Role): Promise<void>;
+  removeMany(ids: string[], role: Role): Promise<void>;
   import(products: Product[]): Promise<void>;
   createBatch(name: string): Promise<string>;
   resetDemo(): Promise<void>;
   restoreBackup(): Promise<void>;
 }
 function read(key = workspaceKey()): Database {
+  // Start Eyewa fresh once, retaining a recoverable snapshot of its previous demo data.
+  const eyewaKey = `${LEGACY_KEY}.org.Eyewa`;
+  const freshKey = `${eyewaKey}.fresh.v1`;
+  if (key === eyewaKey && !localStorage.getItem(freshKey)) {
+    const previous = localStorage.getItem(key);
+    if (previous) localStorage.setItem(`${key}.backup`, previous);
+    const noticesKey = generationNotificationKey("Eyewa");
+    const previousNotices = localStorage.getItem(noticesKey);
+    if (previousNotices) localStorage.setItem(`${noticesKey}.backup`, previousNotices);
+    localStorage.setItem(noticesKey, "[]");
+    try {
+      const navKey = navigationKey("Eyewa");
+      const previousNavigation = sessionStorage.getItem(navKey);
+      if (previousNavigation) sessionStorage.setItem(`${navKey}.backup`, previousNavigation);
+      sessionStorage.setItem(navKey, "null");
+    } catch { /* Product validation also drops stale navigation when session storage is unavailable. */ }
+    localStorage.setItem(key, JSON.stringify(initialDatabase(key)));
+    localStorage.setItem(freshKey, "true");
+  }
   const raw = localStorage.getItem(key);
   if (raw) {
     try {
@@ -36,8 +59,23 @@ function read(key = workspaceKey()): Database {
         data.version === 1 &&
         Array.isArray(data.products) &&
         Array.isArray(data.batches)
-      )
+      ) {
+        let migrated = false;
+        for (const p of data.products as Product[]) {
+          if (requiresUnpublished(p.status) && p.consoleStatus === "Published") {
+            p.consoleStatus = "Draft";
+            migrated = true;
+          }
+          if (p.singleProductDraft === undefined && p.batchId.startsWith("manual-") && p.name === "Untitled product" &&
+            p.brand === "Unspecified" && p.category === "Unspecified" && !p.productUrl && !p.modelUrl && !p.imageUrl &&
+            ["Available", "New"].includes(p.status)) {
+            p.singleProductDraft = true;
+            migrated = true;
+          }
+        }
+        if (migrated) localStorage.setItem(key, JSON.stringify(data));
         return data;
+      }
     } catch {
       /* Retain a recoverable corrupt snapshot. */ localStorage.setItem(
         `${key}.recovery`,
@@ -64,6 +102,16 @@ async function write(fn: (db: Database, key: string) => void | Promise<void>) {
 }
 export const repository: ProductRepository = {
   read,
+  async removeMany(ids, role) {
+    if (role !== "Admin / Manager") throw Error("Only a manager can delete products.");
+    const selected = new Set(ids);
+    if (!selected.size) return;
+    await write((db) => {
+      if ([...selected].some((id) => !db.products.some((p) => p.id === id)))
+        throw Error("A selected product no longer exists. Refresh and try again.");
+      db.products = db.products.filter((p) => !selected.has(p.id));
+    });
+  },
   async syncModel(id, sku, url, file, userId, role) {
     let storedKey = "";
     try {
@@ -93,6 +141,8 @@ export const repository: ProductRepository = {
         throw Error(
           "A selected product no longer exists. Refresh the listing and try again.",
         );
+      if (status === "Published" && db.products.some((p) => selected.has(p.id) && requiresUnpublished(p.status)))
+        throw Error("To do and In Progress products must remain unpublished.");
       const at = new Date().toISOString();
       for (const product of db.products) {
         if (
@@ -149,6 +199,7 @@ export const repository: ProductRepository = {
       const keys = new Set(db.products.map((p) => p.sku));
       const ids = new Set(db.products.map((p) => p.id));
       for (const p of products) {
+        if (requiresUnpublished(p.status)) p.consoleStatus = "Draft";
         if (ids.has(p.id)) throw Error(`Product UID ${p.id} already exists. Enter a unique value.`);
         ids.add(p.id);
         if (!p.isDemo && keys.has(p.sku))

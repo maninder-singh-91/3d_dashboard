@@ -267,11 +267,11 @@ input[type="radio"] {
   color: #b7b7bd;
   font-size: 12px;
 }
-.notification-panel {
+.notification-panel.panel {
   color: var(--text);
   top: 54px;
   right: 20px;
-  box-shadow: 0 12px 40px #0000001c;
+  box-shadow: 0 16px 40px #00000026, 0 4px 12px #00000014;
 }
 .notification-panel .icon-button {
   color: var(--text-secondary);
@@ -282,6 +282,20 @@ input[type="radio"] {
 }
 
 /* Compact page hierarchy and restrained surfaces. */
+@media (min-width: 881px) and (min-height: 640px) {
+  main.catalog-page {
+    height: calc(100dvh - var(--header-height));
+    padding: 12px 24px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .catalog-page > .page-heading, .catalog-page > .kpi-grid { flex-shrink: 0; }
+  .catalog-page > .products-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .catalog-page .console-list-toolbar, .catalog-page .products-panel > footer { flex-shrink: 0; }
+  .catalog-page .table-scroll { min-height: 0; flex: 1; overflow: auto; }
+  .catalog-page .table-scroll th { position: sticky; top: 0; z-index: 1; }
+}
 main,
 main:has(> .detail-heading) {
   max-width: none;
@@ -653,11 +667,19 @@ main:has(> .detail-heading) {
 .kpi-card {
   padding: 18px;
   min-height: 104px;
+  background: #fff;
 }
 .kpi-card:hover {
-  border-color: #efb6d1;
+  border-color: var(--accent);
+  background: #fff;
   box-shadow: 0 2px 8px #00000004;
   transform: none;
+}
+.kpi-card.selected,
+.kpi-card.selected:hover {
+  border-color: var(--accent);
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .kpi-top {
   font-size: 14px;
@@ -1153,6 +1175,15 @@ main:has(> .detail-heading) {
   }
 }
 
+.catalog-search-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
+.catalog-search-filter-row .search-field { max-width: 380px; }
+.catalog-console-filter { display: flex; align-items: center; gap: 10px; width: 228px; margin-left: auto; flex-shrink: 0; }
+.catalog-console-filter > .themed-select { flex: 1; min-width: 0; }
+.catalog-filter-icon { flex-shrink: 0; color: var(--text-primary); }
+@media (max-width: 600px) {
+  .catalog-search-filter-row { flex-wrap: wrap; }
+  .catalog-console-filter { width: 100%; }
+}
 .console-list-toolbar {
   padding: 12px 24px;
   border-bottom: 1px solid var(--border);
@@ -1369,3 +1400,60 @@ main:has(> .detail-heading) {
 @media (max-width: 560px) {
   .console-bulk-actions { left: 50%; }
 }
+.catalog-empty-import {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Black button theme; switches retain the pink accent. */
+.fynd-console button:not([role="switch"]),
+.fynd-console a.button {
+  --accent: #111;
+  --accent-hover: #292929;
+  --accent-soft: #f1f1f3;
+}
+.button.primary {
+  background: #111;
+  border-color: #111;
+  color: #fff;
+}
+.button.primary:hover:not(:disabled) {
+  background: #292929;
+  border-color: #292929;
+}
+.fynd-console .button.secondary:hover:not(:disabled),
+.fynd-console .open-task:hover:not(:disabled) {
+  background: #f1f1f3;
+  border-color: #111;
+  color: #111;
+}
+.fynd-console .generation-model-options button[aria-pressed="true"] {
+  background: #111;
+  border-color: #111;
+  color: #fff;
+}
+.fynd-console .generation-mesh-toggle[aria-checked="true"] {
+  background: #e50071;
+}
+.fynd-console .model-qr-download { color: #111; }
+
+.fynd-console .generation-card-progress progress,
+.fynd-console .generation-progress-stage > progress {
+  accent-color: #e50071;
+}
+.fynd-console .generation-card-progress progress::-webkit-progress-value,
+.fynd-console .generation-progress-stage > progress::-webkit-progress-value {
+  background: #e50071;
+}
+.fynd-console .generation-card-progress progress::-moz-progress-bar,
+.fynd-console .generation-progress-stage > progress::-moz-progress-bar {
+  background: #e50071;
+}
+.notification-panel { max-height: min(560px, calc(100dvh - 80px)); overflow-y: auto; }
+.notification-dot.notification-read { background: #d5d5db; }
+.notification-comment-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; line-height: 1.5; }

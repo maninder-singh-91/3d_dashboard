@@ -26,7 +26,7 @@ describe("Generation model sync", () => {
     const before = repository.read();
     await repository.syncModel("target", "8782", "/models/studio-chair.glb", undefined, "artist", "3D Artist");
     const after = repository.read();
-    expect(after.products[0]).toMatchObject({ id: "target", sku: "8782", status: "Available", consoleStatus: "Published", modelUrl: "/models/studio-chair.glb" });
+    expect(after.products[0]).toMatchObject({ id: "target", sku: "8782", status: "Available", consoleStatus: "Draft", modelUrl: "/models/studio-chair.glb" });
     expect(after.products[0].activity[0].text).toContain("Sample 3D model synced");
     expect(after.products[1]).toEqual(before.products[1]);
   });

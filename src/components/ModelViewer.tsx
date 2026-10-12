@@ -9,6 +9,7 @@ export type MaterialSetting = {
   roughness: number;
 };
 export type ViewerSettings = {
+  toneMapping?: string;
   background: string;
   exposure: number;
   shadow: number;
@@ -19,6 +20,7 @@ export function ModelStage({
   url: source,
   name,
   settings,
+  environmentUrl,
   onMaterials,
   onLoadError,
   onScreenshot,
@@ -26,6 +28,7 @@ export function ModelStage({
   url: string;
   name: string;
   settings?: ViewerSettings;
+  environmentUrl?: string;
   onMaterials?: (
     materials: {
       name: string;
@@ -145,7 +148,7 @@ export function ModelStage({
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [loaded, error, url, onScreenshot]);
+  }, [loaded, error, url, onScreenshot, settings, environmentUrl]);
   return (
     <>
       <div
@@ -159,8 +162,9 @@ export function ModelStage({
           "camera-controls": true,
           "auto-rotate": settings ? settings.rotate : true,
           "shadow-intensity": settings?.shadow ?? "1",
-          "environment-image": "neutral",
+          "environment-image": environmentUrl || "neutral",
           exposure: settings?.exposure ?? "1",
+          "tone-mapping": settings?.toneMapping ?? "auto",
           "camera-orbit": "30deg 75deg auto",
           style: { width: "100%", height: "var(--model-stage-height, 480px)" },
         })}

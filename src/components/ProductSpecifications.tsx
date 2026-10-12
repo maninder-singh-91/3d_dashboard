@@ -1,5 +1,5 @@
-import { useImperativeHandle, useRef, useState, type Ref } from "react";
-import { ChevronDown, Copy, SlidersHorizontal } from "lucide-react";
+import { useImperativeHandle, useRef, useState, type Ref, type ReactNode } from "react";
+import { Copy, SlidersHorizontal } from "lucide-react";
 import type {
   Product,
   ProductDetails,
@@ -7,81 +7,16 @@ import type {
 } from "../lib/types";
 import type { Action } from "../lib/workflow";
 import ThemedSelect from "./ThemedSelect";
+import { productSpecificationsOf } from "../lib/productSpecifications";
+import { productInformationFields, specificationFields } from "../lib/productDetailFields";
 
-const empty: Specifications = {
-  barcode: "",
-  storefront: "",
-  length: "",
-  width: "",
-  height: "",
-  unit: "cm",
-  color: "",
-  weight: "",
-  usageArea: "",
-  roomType: "",
-  material: "",
-  price: "",
-  currency: "",
-};
-const specificationFields: {
-  key: keyof Specifications;
-  label: string;
-  placeholder: string;
-  numeric?: boolean;
-  choices?: string[];
-}[] = [
-  {
-    key: "length",
-    label: "Length",
-    placeholder: "Enter length",
-    numeric: true,
-  },
-  { key: "width", label: "Width", placeholder: "Enter width", numeric: true },
-  {
-    key: "height",
-    label: "Height",
-    placeholder: "Enter height",
-    numeric: true,
-  },
-  {
-    key: "unit",
-    label: "Dimension unit",
-    placeholder: "Select unit",
-    choices: ["cm", "mm", "m", "in", "ft"],
-  },
-  {
-    key: "material",
-    label: "Material",
-    placeholder: "e.g. Wood, fabric, metal",
-  },
-  { key: "color", label: "Color", placeholder: "Color name or hex code" },
-  {
-    key: "weight",
-    label: "Weight (kg)",
-    placeholder: "Enter weight",
-    numeric: true,
-  },
-  {
-    key: "roomType",
-    label: "Room type",
-    placeholder: "e.g. Living room, bedroom",
-  },
-  { key: "storefront", label: "Storefront", placeholder: "Enter storefront" },
-  { key: "price", label: "Price", placeholder: "Enter price", numeric: true },
-  {
-    key: "currency",
-    label: "Currency",
-    placeholder: "Select currency",
-    choices: ["INR", "USD", "EUR", "GBP", "AED"],
-  },
-];
 function detailsOf(p: Product): ProductDetails {
   return {
     name: p.name,
     brand: p.brand,
     category: p.category,
     productUrl: p.productUrl,
-    specifications: { ...empty, ...p.specifications },
+    specifications: productSpecificationsOf(p),
   };
 }
 
@@ -92,7 +27,11 @@ export default function ProductSpecifications({
   onCopy,
   initiallyOpen = false,
   saveRef,
+  onChange,
+  lighting,
 }: {
+  lighting?: ReactNode;
+  onChange?: () => void;
   saveRef?: Ref<{ save: () => Promise<boolean> }>;
   initiallyOpen?: boolean;
   product: Product;
@@ -109,6 +48,7 @@ export default function ProductSpecifications({
   const formRef = useRef<HTMLFormElement>(null);
   useImperativeHandle(saveRef, () => ({ save: () => save() }));
   function spec(key: keyof Specifications, value: string) {
+    onChange?.();
     setDraft((d) => ({
       ...d,
       specifications: { ...d.specifications, [key]: value },
@@ -140,12 +80,11 @@ export default function ProductSpecifications({
     }
   }
   return (
-    <details className={`panel detail-disclosure product-specifications${initiallyOpen ? " product-specifications-top" : ""}`} open={initiallyOpen || undefined}>
-      <summary>
+    <section className={`panel detail-disclosure product-specifications${initiallyOpen ? " product-specifications-top" : ""}`} aria-label="Product details & specifications">
+      <div className="product-specifications-heading">
         <SlidersHorizontal size={19} />
         <h3>Product details &amp; specifications</h3>
-        <ChevronDown size={16} />
-      </summary>
+      </div>
       <form ref={formRef} onSubmit={save}>
         <div
           className="spec-section-switch"
@@ -159,26 +98,15 @@ export default function ProductSpecifications({
           >
             Product information
           </button>
-          <button
-            type="button"
-            aria-pressed={section === "specifications"}
-            onClick={() => setSection("specifications")}
-          >
-            Specifications
-          </button>
+          {lighting && <button type="button" aria-pressed={section === "lighting"} onClick={() => setSection("lighting")}>
+            Lighting
+          </button>}
         </div>
         {section === "product" ? (
           <>
             <div className="spec-fields">
-              {(
-                [
-                  ["name", "Product name"],
-                  ["category", "Category"],
-                  ["brand", "Brand name"],
-                  ["productUrl", "Product URL"],
-                ] as const
-              ).map(([key, label]) => (
-                <label className="field" key={key}>
+              {productInformationFields.map(([key, label]) => (
+                <label className={`field${key === "name" ? " spec-field-wide" : ""}`} key={key}>
                   <span>
                     {label}
                     {key !== "productUrl" && <span className="muted"> *</span>}
@@ -188,6 +116,7 @@ export default function ProductSpecifications({
                     readOnly={locked}
                     placeholder={`Enter ${label.toLowerCase()}`}
                     onChange={(e) => {
+                      onChange?.();
                       setDraft({ ...draft, [key]: e.target.value });
                     }}
                   />
@@ -221,10 +150,6 @@ export default function ProductSpecifications({
                   onChange={(e) => spec("barcode", e.target.value)}
                 />
               </label>
-            </div>
-          </>
-        ) : (
-          <div className="spec-fields">
             {specificationFields.map(
               ({ key, label, placeholder, numeric, choices }) => (
                 <div className="field" key={key}>
@@ -255,14 +180,17 @@ export default function ProductSpecifications({
                 </div>
               ),
             )}
-          </div>
+            </div>
+          </>
+        ) : (
+          <div className="product-lighting-content">{lighting}</div>
         )}
         {error && (
           <p className="spec-error" role="alert">
             {error}
           </p>
         )}
-        <div className="spec-footer">
+        {!saveRef && <div className="spec-footer">
           {editable && (
             <div className="row">
               <button
@@ -285,8 +213,8 @@ export default function ProductSpecifications({
               </button>
             </div>
           )}
-        </div>
+        </div>}
       </form>
-    </details>
+    </section>
   );
 }

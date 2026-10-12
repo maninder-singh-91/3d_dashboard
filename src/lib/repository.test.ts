@@ -1,4 +1,9 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ManualProductUpload from "../components/ManualProductUpload";
+import { newProduct } from "./imports";
+import { productSpecificationsOf } from "./productSpecifications";
 import { repository } from "./repository";
 import { prepareDemoCatalog } from "./catalogFile";
 import { productStatusLabel } from "./productStatus";
@@ -27,6 +32,66 @@ beforeEach(() => {
   });
 });
 describe("Repository concurrency", () => {
+  it("starts Eyewa fresh once, backs up its demo data, and retains subsequent imports", async () => {
+    const glamar = repository.read();
+    const key = "modello.workspace.v1.org.Eyewa";
+    const previous = JSON.stringify(glamar);
+    localStorage.setItem(key, previous);
+    localStorage.setItem("glamar.generation-notifications.Eyewa", '[{"id":"old"}]');
+    sessionStorage.setItem("glamar.navigation.Eyewa", '{"page":"3D Generation"}');
+    sessionStorage.setItem("glamar.demo-organisation.v1", "Eyewa");
+    expect(repository.read()).toEqual({ version: 1, products: [], batches: [] });
+    expect(localStorage.getItem(`${key}.backup`)).toBe(previous);
+    expect(localStorage.getItem("glamar.generation-notifications.Eyewa")).toBe("[]");
+    expect(sessionStorage.getItem("glamar.navigation.Eyewa")).toBe("null");
+    const product = { ...glamar.products[0], id: "eyewa-new-product" };
+    await repository.import([product]);
+    expect(repository.read().products).toEqual([product]);
+    sessionStorage.setItem("glamar.demo-organisation.v1", "GLAMAR");
+    expect(repository.read()).toEqual(glamar);
+  });
+  it("saves manually entered dimensions and prefills them in existing product generation", async () => {
+    const product = newProduct({ name: "Manual dimensions chair", sku: "NO-CATALOG-DIMENSIONS", status: "In Progress", assigneeId: "maninder" });
+    await repository.import([product]);
+    expect(productSpecificationsOf(product).length).toBe("");
+    await repository.update(product.id, { type: "details", details: {
+      name: product.name, brand: product.brand, category: product.category, productUrl: product.productUrl,
+      specifications: { ...productSpecificationsOf(product), length: "120.5", width: "80.25", height: "42", unit: "in" },
+    } }, "maninder", "Admin / Manager");
+    const saved = repository.read().products.find(item => item.id === product.id)!;
+    expect(saved.specifications).toMatchObject({ length: "120.5", width: "80.25", height: "42", unit: "in" });
+    const html = renderToStaticMarkup(createElement(ManualProductUpload, { product: saved, busy: false, onUpload: async () => true }));
+    expect(html).toContain('value="120.5"');
+    expect(html).toContain('value="80.25"');
+    expect(html).toContain('value="42"');
+    expect(html).toContain('<span>in</span>');
+    expect(saved.status).toBe("In Progress");
+  });
+
+  it("forces production listings unpublished on import and rejects mixed bulk publishing atomically", async () => {
+    const original = repository.read();
+    const todo = original.products.find((p) => p.status === "Available")!;
+    const review = original.products.find((p) => p.status === "In Review")!;
+    await expect(repository.setConsoleStatus([todo.id, review.id], "Published", "Admin / Manager")).rejects.toThrow("must remain unpublished");
+    expect(repository.read()).toEqual(original);
+    for (const status of ["Available", "New", "Claimed", "In Progress", "Corrections Required"] as const) {
+      const imported = { ...todo, id: `forced-${status}`, sku: `forced-${status}`, status, consoleStatus: "Published" as const };
+      await repository.import([imported]);
+      expect(repository.read().products.find((p) => p.id === imported.id)?.consoleStatus).toBe("Draft");
+    }
+    localStorage.setItem("modello.workspace.v1", JSON.stringify({ ...original, products: [{ ...todo, consoleStatus: "Published" }] }));
+    expect(repository.read().products[0].consoleStatus).toBe("Draft");
+  });
+  it("deletes selected products atomically and rejects missing IDs or non-managers", async () => {
+    const before = repository.read();
+    const ids = before.products.slice(0, 2).map((p) => p.id);
+    await expect(repository.removeMany(ids, "3D Artist")).rejects.toThrow("Only a manager");
+    await expect(repository.removeMany([...ids, "missing"], "Admin / Manager")).rejects.toThrow("no longer exists");
+    expect(repository.read()).toEqual(before);
+    await repository.removeMany(ids, "Admin / Manager");
+    expect(repository.read().products).toEqual(before.products.filter((p) => !ids.includes(p.id)));
+    expect(repository.read().batches).toEqual(before.batches);
+  });
   it("opens an empty WestElm catalog without changing GlamAR and preserves empty catalogs", async () => {
     const glamar = repository.read();
     sessionStorage.setItem("glamar.demo-organisation.v1", "WestElm");
@@ -53,7 +118,7 @@ describe("Repository concurrency", () => {
     expect(repository.read().products).toEqual([product]);
   });
   it("updates console status in bulk without changing production details", async () => {
-    const original = repository.read().products.slice(0, 3);
+    const original = repository.read().products.filter((p) => ["In Review", "Completed"].includes(p.status)).slice(0, 3);
     const ids = original.slice(0, 2).map((p) => p.id);
     await repository.setConsoleStatus(ids, "Published", "Admin / Manager");
     const published = repository.read().products;

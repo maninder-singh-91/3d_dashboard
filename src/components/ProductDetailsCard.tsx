@@ -42,7 +42,8 @@ export default function ProductDetailsCard({
   return (
     <section className="todo-info panel" aria-label="Task status">
       <dl>
-        <TaskAssignee assigneeId={product.assigneeId} />
+        <TaskAssignee assigneeId={product.assigneeId} canAssign={role === "Admin / Manager" && !["Review", "Done"].includes(statusLabel)}
+          onAssign={(assigneeId) => onUpdate({ type: "assign", assigneeId })} />
         <div>
           <dt>Status</dt>
           <dd className="todo-status-select">

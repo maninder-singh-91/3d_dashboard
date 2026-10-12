@@ -1,37 +1,38 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ArrowUpRight,
   Box,
   Check,
-  ChevronDown,
-  Copy,
   Download,
-  Link2,
-  Paintbrush,
-  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import type { Product, Role } from "../lib/types";
 import type { Action } from "../lib/workflow";
 import type { ViewerSettings, MaterialSetting } from "./ModelViewer";
-import { Modal, ProductImage } from "./UI";
+import { Modal } from "./UI";
 import ProductSpecifications from "./ProductSpecifications";
 import ProductDetailsCard from "./ProductDetailsCard";
 import RevisionComments from "./RevisionComments";
 import ModelImport from "./ModelImport";
+import { useHdri } from "../lib/useHdri";
+import HdriThumbnail from "./HdriThumbnail";
+import ThemedSelect from "./ThemedSelect";
+import ModelQrCode from "./ModelQrCode";
+import { arViewLink } from "../lib/arView";
+import { toneMappingOptions } from "../lib/toneMapping";
 import {
   loadModelFile,
   removeModelFile,
   saveModelFile,
 } from "../lib/modelFiles";
-import { transition, validUrl } from "../lib/workflow";
+import { transition } from "../lib/workflow";
 import { productStatusLabel } from "../lib/productStatus";
 import { localModelKey, isLocalModel } from "../lib/modelReference";
 const ModelStage = lazy(() =>
   import("./ModelViewer").then((m) => ({ default: m.ModelStage })),
 );
 const defaultSettings: ViewerSettings = {
+  toneMapping: "auto",
   background: "#ffffff",
   exposure: 1,
   shadow: 1,
@@ -65,6 +66,7 @@ function settingsFor(key: string): ViewerSettings {
         };
     }
     return {
+      toneMapping: toneMappingOptions.some((option) => option.value === saved.toneMapping) ? saved.toneMapping : "auto",
       background: saved.background,
       rotate: saved.rotate,
       exposure: Math.max(0.2, Math.min(2, saved.exposure)),
@@ -93,6 +95,12 @@ export default function CompletedTaskDetail({
   onPublish: () => Promise<void>;
   onCopy: (value: string, kind?: "url" | "uid") => void;
 }) {
+  const hdri = useHdri(p.id);
+  const hdriInput = useRef<HTMLInputElement>(null);
+  const settingsColumn = useRef<HTMLElement>(null);
+  const modelPanel = useRef<HTMLElement>(null);
+  const detailsSave = useRef<{ save: () => Promise<boolean> }>(null);
+  const [saving, setSaving] = useState(false);
   const [localModel, setLocalModel] = useState<File>();
   const [localUrl, setLocalUrl] = useState("");
   useEffect(() => {
@@ -121,21 +129,42 @@ export default function CompletedTaskDetail({
     return () => URL.revokeObjectURL(url);
   }, [localModel]);
   const modelUrl = isLocalModel(p.modelUrl) ? localUrl : p.modelUrl || localUrl;
+  const [modelScreenshot, setModelScreenshot] = useState("");
+  useEffect(() => { setModelScreenshot(""); }, [modelUrl]);
   const modelName =
     localModel?.name ||
     modelUrl.split("/").pop()?.split("?")[0] ||
     "Product model";
   const storageKey = `glamar.viewer.${p.id}.${p.modelUrl}`;
   const [settings, setSettings] = useState(() => settingsFor(storageKey));
-  const [materials, setMaterials] = useState<
-    (MaterialSetting & { name: string; index: number })[]
-  >([]);
-  const [active, setActive] = useState(0);
-  const [tab, setTab] = useState<"config" | "viewer">("config");
   const [saved, setSaved] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState("");
   const isDone = productStatusLabel(p.status) === "Done";
+  useEffect(() => { setSaved(false); }, [p.status]);
+  useEffect(() => {
+    const lighting = settingsColumn.current?.querySelector(".product-specifications");
+    const panel = modelPanel.current;
+    if (!lighting || !panel || isDone) return;
+    const alignViewer = () => {
+      if (window.innerWidth <= 980) {
+        panel.style.removeProperty("--model-stage-height");
+        return;
+      }
+      const height = lighting.getBoundingClientRect().bottom - panel.getBoundingClientRect().top
+        - 2;
+      panel.style.setProperty("--model-stage-height", `${Math.max(200, height)}px`);
+    };
+    const observer = new ResizeObserver(alignViewer);
+    observer.observe(lighting);
+    window.addEventListener("resize", alignViewer);
+    alignViewer();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", alignViewer);
+      panel.style.removeProperty("--model-stage-height");
+    };
+  }, [isDone, localUrl, p.id]);
   const published = p.consoleStatus === "Published";
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -163,8 +192,6 @@ export default function CompletedTaskDetail({
       await onUpdate({ type: "remove-model" });
       setLocalModel(undefined);
       setLocalUrl("");
-      setMaterials([]);
-      setActive(0);
       setSettings(defaultSettings);
       setSaved(false);
       setConfirmDelete(false);
@@ -189,25 +216,16 @@ export default function CompletedTaskDetail({
       setDeletingModel(false);
     }
   }
-  const material = materials[active];
-  const materialSettings = material
-    ? settings.materials[material.index] || material
-    : null;
   function change(next: Partial<ViewerSettings>) {
     setSettings((s) => ({ ...s, ...next }));
     setSaved(false);
   }
-  function changeMaterial(next: Partial<MaterialSetting>) {
-    if (!material || !materialSettings) return;
-    change({
-      materials: {
-        ...settings.materials,
-        [material.index]: { ...materialSettings, ...next },
-      },
-    });
-  }
-  function save() {
+  async function save() {
+    if (saving) return false;
+    setSaving(true);
+    setSaved(false);
     try {
+      if (await detailsSave.current?.save() === false) return false;
       localStorage.setItem(storageKey, JSON.stringify(settings));
       setSaved(true);
       setError("");
@@ -217,6 +235,8 @@ export default function CompletedTaskDetail({
         "Viewer settings could not be saved. Please free some browser storage and try again.",
       );
       return false;
+    } finally {
+      setSaving(false);
     }
   }
   async function publish() {
@@ -224,8 +244,8 @@ export default function CompletedTaskDetail({
     setPublishing(true);
     setPublishError("");
     try {
-      if (!save()) {
-        setPublishError("Could not save viewer settings. Please try again.");
+      if (!await save()) {
+        setPublishError("Could not save product changes. Please check the fields and try again.");
         return;
       }
       await onPublish();
@@ -241,283 +261,16 @@ export default function CompletedTaskDetail({
         url={modelUrl}
         name={p.name}
         settings={settings}
-        onMaterials={setMaterials}
+        environmentUrl={hdri.url}
+        onScreenshot={setModelScreenshot}
       />
     </Suspense>
   );
-  return (
-    <div className="todo-workspace completed-workspace">
-      <header className="todo-heading">
-        <button className="back-button" onClick={onBack}>
-          <ArrowLeft size={18} /> Back
-        </button>
-        <h1 title={p.name}>{p.name}</h1>
-        <span className="todo-category">{p.category}</span>
-        <div className="todo-header-actions">
-          <button
-            className="button primary"
-            disabled={!modelUrl || (isDone && (publishing || published || role !== "Admin / Manager"))}
-            title={isDone && role !== "Admin / Manager" ? "Only a manager can publish products" : undefined}
-            onClick={isDone ? () => void publish() : save}
-          >
-            {isDone ? (publishing ? "Publishing…" : published ? "Published" : "Publish") : saved ? (
-              <>
-                <Check size={16} /> Saved
-              </>
-            ) : (
-              "Save"
-            )}
-          </button>
-        </div>
-      </header>
-      {publishError && <p className="error-banner" role="alert">{publishError}</p>}
-      <div className="todo-layout">
-        <aside className="todo-reference-column">
-          <section className="panel completed-reference">
-            <div className="todo-panel-heading">
-              <h3>Product reference</h3>
-            </div>
-            <ProductImage product={p} />
-            {validUrl(p.productUrl) && (
-              <a href={p.productUrl} target="_blank" rel="noreferrer">
-                View product <ArrowUpRight size={15} />
-              </a>
-            )}
-          </section>
-          {!isDone && <section className="panel completed-materials">
-            <div className="todo-panel-heading">
-              <h3>Material</h3>
-              <ChevronDown size={17} />
-            </div>
-            <div className="completed-material-list">
-              {materials.map((item, i) => (
-                <button
-                  key={item.index}
-                  aria-pressed={active === i}
-                  onClick={() => {
-                    setActive(i);
-                    setTab("config");
-                  }}
-                >
-                  {item.name}
-                </button>
-              ))}
-              {!materials.length && (
-                <p className="muted">
-                  {modelUrl
-                    ? "Materials appear when the model loads."
-                    : "No materials available"}
-                </p>
-              )}
-            </div>
-          </section>}
-        </aside>
-        <section
-          className="todo-gallery panel completed-model-panel"
-          aria-label="Product 3D model"
-        >
-          {modelUrl && (
-            <div className="todo-url-toolbar">
-              {modelUrl ? (
-                <>
-                  <a
-                    href={modelUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={modelUrl}
-                  >
-                    <Link2 size={19} />
-                    <span>{localModel ? modelName : modelUrl}</span>
-                  </a>
-                  {!localModel && (
-                    <button
-                      className="icon-button"
-                      aria-label="Copy model URL"
-                      onClick={() => onCopy(modelUrl)}
-                    >
-                      <Copy size={18} />
-                    </button>
-                  )}
-                  <a
-                    className="icon-button"
-                    href={modelUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    download={modelName}
-                    aria-label="Download 3D model"
-                  >
-                    <Download size={18} />
-                  </a>
-                </>
-              ) : (
-                <span className="muted">No 3D model uploaded</span>
-              )}
-            </div>
-          )}
-          {modelUrl ? (
-            stage
-          ) : (
-            <ModelImport productId={p.id} onImported={setLocalModel} />
-          )}
-          {modelUrl === "/models/studio-chair.glb" && (
-            <span className="completed-sample">Sample model</span>
-          )}
-        </section>
-        <aside className="todo-settings-column">
-          <ProductDetailsCard
-            product={p}
-            role={role}
-            userId={userId}
-            onUpdate={onUpdate}
-          />
-          <ProductSpecifications
-            initiallyOpen
-            onCopy={(value) => onCopy(value, "uid")}
-            product={p}
-            editable={role === "Admin / Manager"}
-            onUpdate={onUpdate}
-          />
-          <RevisionComments product={p} role={role} userId={userId} onUpdate={onUpdate} />
-          {!isDone && <>
-          <div
-            className="panel completed-tabs"
-            role="group"
-            aria-label="Viewer settings"
-          >
-            <button
-              aria-pressed={tab === "config"}
-              onClick={() => setTab("config")}
-            >
-              <SlidersHorizontal size={22} />
-              3D Config
-            </button>
-            <button
-              aria-pressed={tab === "viewer"}
-              onClick={() => setTab("viewer")}
-            >
-              <Box size={22} />
-              3D Viewer
-            </button>
-          </div>
-          <section className="panel completed-model-info">
-            <h3>3D model</h3>
-            <div>
-              <ProductImage product={p} />
-              <span>
-                <strong>{modelUrl ? modelName : "Not uploaded"}</strong>
-                <small>{p.sku}</small>
-              </span>
-              {inReview && (
-                <button
-                  type="button"
-                  className="icon-button completed-delete-model"
-                  aria-label="Delete 3D model"
-                  title={
-                    !modelUrl
-                      ? "No 3D model to delete"
-                      : !canDeleteModel
-                        ? "You do not have permission to delete this model"
-                        : "Delete 3D model"
-                  }
-                  disabled={!modelUrl || !canDeleteModel || deletingModel}
-                  onClick={() => {
-                    setDeleteError("");
-                    setConfirmDelete(true);
-                  }}
-                >
-                  <Trash2 size={17} />
-                </button>
-              )}
-            </div>
-          </section>
-          {tab === "config" ? (
-            <>
-              {material && (
-                <section className="panel completed-editing">
-                  <Paintbrush size={20} />
-                  <div>
-                    <small>Editing material</small>
-                    <strong>{material.name}</strong>
-                  </div>
-                </section>
-              )}
-              <details className="panel completed-control" open>
-                <summary>
-                  <Paintbrush size={17} /> Base color <ChevronDown size={16} />
-                </summary>
+  const lightingContent = (
+<section className="completed-control lighting-panel" aria-label="Lighting controls">
                 <div>
                   <label>
-                    Color
-                    <input
-                      aria-label="Material base color"
-                      type="color"
-                      disabled={!materialSettings}
-                      value={materialSettings?.color || "#ffffff"}
-                      onInput={(e) =>
-                        changeMaterial({ color: e.currentTarget.value })
-                      }
-                    />
-                  </label>
-                </div>
-              </details>
-              <details className="panel completed-control" open>
-                <summary>
-                  <SlidersHorizontal size={17} /> Metallic &amp; roughness{" "}
-                  <ChevronDown size={16} />
-                </summary>
-                <div>
-                  <label>
-                    Metallic{" "}
-                    <output>
-                      {materialSettings?.metallic.toFixed(2) || "0.00"}
-                    </output>
-                  </label>
-                  <input
-                    aria-label="Metallic"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    disabled={!materialSettings}
-                    value={materialSettings?.metallic || 0}
-                    onInput={(e) =>
-                      changeMaterial({
-                        metallic: Number(e.currentTarget.value),
-                      })
-                    }
-                  />
-                  <label>
-                    Roughness{" "}
-                    <output>
-                      {materialSettings?.roughness.toFixed(2) || "0.00"}
-                    </output>
-                  </label>
-                  <input
-                    aria-label="Roughness"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    disabled={!materialSettings}
-                    value={materialSettings?.roughness || 0}
-                    onInput={(e) =>
-                      changeMaterial({
-                        roughness: Number(e.currentTarget.value),
-                      })
-                    }
-                  />
-                </div>
-              </details>
-            </>
-          ) : (
-            <>
-              <details className="panel completed-control" open>
-                <summary>
-                  Background <ChevronDown size={16} />
-                </summary>
-                <div>
-                  <label>
-                    Color{" "}
+                    Background color{" "}
                     <input
                       aria-label="Viewer background"
                       type="color"
@@ -528,12 +281,26 @@ export default function CompletedTaskDetail({
                     />
                   </label>
                 </div>
-              </details>
-              <details className="panel completed-control" open>
-                <summary>
-                  Lighting <ChevronDown size={16} />
-                </summary>
                 <div>
+                  <div className="hdri-upload">
+                    <span>HDRI environment</span>
+                    <HdriThumbnail file={hdri.file} busy={hdri.busy} onUpload={(file) => {
+                      if (file) void hdri.update(file);
+                      else hdriInput.current?.click();
+                    }} />
+                    <input ref={hdriInput} hidden type="file" accept=".hdr" aria-label="Upload HDRI environment" onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void hdri.update(file);
+                      e.target.value = "";
+                    }} />
+                    {hdri.file && <button type="button" className="button secondary" disabled={hdri.busy} onClick={() => void hdri.update()}>Use default lighting</button>}
+                    <small>.hdr · Maximum 20 MB</small>
+                    {hdri.error && <p className="error-banner" role="alert">{hdri.error}</p>}
+                  </div>
+                  <div className="tone-mapping-control">
+                    <label>Tone mapping</label>
+                    <ThemedSelect label="Tone mapping" value={settings.toneMapping ?? "auto"} options={toneMappingOptions} onChange={(toneMapping) => change({ toneMapping })} />
+                  </div>
                   <label>
                     Exposure <output>{settings.exposure.toFixed(1)}</output>
                   </label>
@@ -563,35 +330,121 @@ export default function CompletedTaskDetail({
                     }
                   />
                 </div>
-              </details>
-              <section className="panel completed-control">
-                <div>
-                  <label>
-                    Auto rotate{" "}
-                    <input
-                      type="checkbox"
-                      checked={settings.rotate}
-                      onInput={(e) =>
-                        change({ rotate: e.currentTarget.checked })
-                      }
-                    />
-                  </label>
-                </div>
               </section>
-            </>
+  );
+  return (
+    <div className="todo-workspace completed-workspace">
+      <header className="todo-heading">
+        <button className="back-button" onClick={onBack}>
+          <ArrowLeft size={18} /> Back
+        </button>
+        <h1 title={p.name}>{p.name}</h1>
+        <span className="todo-category">{p.category}</span>
+        <div className="todo-header-actions">
+          <button
+            className="button primary"
+            disabled={saving || (isDone && (!modelUrl || publishing || published || role !== "Admin / Manager"))}
+            title={isDone && role !== "Admin / Manager" ? "Only a manager can publish products" : undefined}
+            onClick={isDone ? () => void publish() : save}
+          >
+            {isDone ? (publishing ? "Publishing…" : published ? "Published" : "Publish") : saving ? "Saving…" : saved ? (
+              <>
+                <Check size={16} /> Saved
+              </>
+            ) : (
+              "Save"
+            )}
+          </button>
+        </div>
+      </header>
+      {publishError && <p className="error-banner" role="alert">{publishError}</p>}
+      <div className="todo-layout">
+        <aside className="todo-reference-column">
+          <section className="panel completed-model-info">
+            <h3>3D model</h3>
+            <div>
+              <div className="product-image model-screenshot">
+                {modelScreenshot ? <img src={modelScreenshot} alt={`3D model screen grab of ${p.name}`} /> : <Box size={24} aria-label="3D model preview" />}
+              </div>
+              <span>
+                <strong>{modelUrl ? modelName : "Not uploaded"}</strong>
+                <small>{p.sku}</small>
+              </span>
+              {inReview && (
+                <button
+                  type="button"
+                  className="icon-button completed-delete-model"
+                  aria-label="Delete 3D model"
+                  title={
+                    !modelUrl
+                      ? "No 3D model to delete"
+                      : !canDeleteModel
+                        ? "You do not have permission to delete this model"
+                        : "Delete 3D model"
+                  }
+                  disabled={!modelUrl || !canDeleteModel || deletingModel}
+                  onClick={() => {
+                    setDeleteError("");
+                    setConfirmDelete(true);
+                  }}
+                >
+                  <Trash2 size={17} />
+                </button>
+              )}
+            </div>
+            {modelUrl && (
+              <a className="button secondary model-card-download" href={modelUrl} download={modelName} target="_blank" rel="noreferrer" aria-label="Download model file">
+                <Download size={16} /> Download
+              </a>
+            )}
+          </section>
+
+          {modelUrl && <section className="panel model-qr-panel">
+            <ModelQrCode
+              url={arViewLink(localModel ? "" : p.modelUrl || modelUrl, window.location.origin, p.name)
+                || arViewLink("/models/studio-chair.glb", window.location.origin, p.name)}
+              name={p.name}
+            />
+          </section>}
+        </aside>
+        <section
+          ref={modelPanel}
+          className="todo-gallery panel completed-model-panel"
+          aria-label="Product 3D model"
+        >
+          {modelUrl ? (
+            stage
+          ) : (
+            <ModelImport productId={p.id} onImported={setLocalModel} />
           )}
-          {saved && (
-            <p className="todo-saved" role="status">
-              <Check size={14} /> Viewer settings saved on this device
-            </p>
+          {modelUrl === "/models/studio-chair.glb" && (
+            <span className="completed-sample">Sample model</span>
           )}
-          </>}
+        </section>
+        <aside ref={settingsColumn} className="todo-settings-column">
+          <ProductDetailsCard
+            product={p}
+            role={role}
+            userId={userId}
+            onUpdate={onUpdate}
+          />
+          <ProductSpecifications
+            lighting={lightingContent}
+            saveRef={detailsSave}
+            onChange={() => setSaved(false)}
+            initiallyOpen
+            onCopy={(value) => onCopy(value, "uid")}
+            product={p}
+            editable={role === "Admin / Manager"}
+            onUpdate={onUpdate}
+          />
           {error && (
             <p className="error-banner" role="alert">
               {error}
             </p>
           )}
         </aside>
+        <RevisionComments product={p} role={role} userId={userId} onUpdate={onUpdate} />
       </div>
       {confirmDelete && (
         <Modal

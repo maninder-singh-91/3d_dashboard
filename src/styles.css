@@ -4476,6 +4476,14 @@ main:has(> .detail-heading) { padding-top: 20px; }
   font-weight: 400;
   cursor: pointer;
 }
+.themed-select-menu[popover] {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  max-width: none;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
 .themed-select-menu > li > span { min-width: 0; overflow-wrap: anywhere; }
 .themed-select-menu > li > svg { flex-shrink: 0; }
 .themed-select-menu > li.active { background: #f4f4f4; }
@@ -4493,6 +4501,7 @@ main:has(> .detail-heading) { padding-top: 20px; }
 .spec-section-switch button[aria-pressed="true"] { border-bottom-color: #111; color: #111; font-weight: 600; }
 .spec-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; }
 .spec-fields .field { display: flex; flex-direction: column; gap: 8px; margin: 0; min-width: 0; }
+.spec-fields .spec-field-wide { grid-column: 1 / -1; }
 .spec-fields .field > span, .spec-fields .field > label { font-size: 14px; color: var(--text-secondary); }
 .spec-fields .field > span:first-child, .spec-fields .field > label:first-child { flex: 1; }
 .spec-fields input { width: 100%; min-height: 42px; }

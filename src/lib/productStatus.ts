@@ -25,6 +25,9 @@ const labels: Record<Status, string> = {
 export function productStatusLabel(status: string): string {
   return labels[status as Status] ?? status;
 }
+export function requiresUnpublished(status: string): boolean {
+  return ["To do", "In Progress"].includes(productStatusLabel(status));
+}
 
 export function productStatusClass(status: string): string {
   const label = productStatusLabel(status);

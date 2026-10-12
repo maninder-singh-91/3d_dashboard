@@ -1,9 +1,14 @@
 import type { Product, ProductDetails, Role } from "./types";
-import { productStatusLabel } from "./productStatus";
+import { productStatusLabel, requiresUnpublished } from "./productStatus";
 import { isLocalModel } from "./modelReference";
+import { reviewCycleCount } from "./revisions";
 export type CatalogStatus =
   "Available" | "In Progress" | "In Review" | "On Hold" | "Completed";
 export type Action =
+  | { type: "finish-single-product"; hasImages: boolean; hasDetails: boolean }
+  | { type: "discard-single-product" }
+  | { type: "reset-revisions"; initialInProgress?: boolean }
+  | { type: "acknowledge-revision" }
   | { type: "revision-comment"; comment: string }
   | { type: "sync-model"; sku: string; modelUrl: string }
   | { type: "remove-reference"; url: string }
@@ -38,9 +43,50 @@ export function transition(
   let next = { ...p, updatedAt: now };
   let event = "Production details updated";
   switch (action.type) {
+    case "finish-single-product": {
+      if (!p.singleProductDraft || role === "Reviewer") throw Error("This product cannot be saved as a new draft.");
+      if (!action.hasImages && !action.hasDetails) throw Error("Add images or product details before saving.");
+      next.singleProductDraft = false;
+      event = "Single product saved to the listing.";
+      break;
+    }
+    case "discard-single-product": {
+      if (!p.singleProductDraft || role === "Reviewer") throw Error("This draft cannot be discarded.");
+      next.discardedSingleProductDraft = true;
+      event = "Single product draft discarded.";
+      break;
+    }
+    case "reset-revisions": {
+      if (!admin) throw Error("Only a manager can reset revisions.");
+      next.revisionCycleArchives = [...(p.revisionCycleArchives || []), {
+        at: now, cycle: reviewCycleCount(p), comment: p.revisionComment || "",
+        history: p.revisionHistory || [],
+      }];
+      next.revisionHistory = [];
+      next.revisionAcknowledgedCycles = [];
+      next.revisionCommentsClosed = false;
+      next.revisionComment = "";
+      next.reviewComment = "";
+      next.reviewCycleCount = productStatusLabel(p.status) === "Review" ? 1 : 0;
+      if (action.initialInProgress) {
+        next.status = "In Progress";
+        next.reviewCycleCount = 0;
+        next.submittedAt = null;
+        next.approvedAt = null;
+        next.reviewStatus = "Not submitted";
+      }
+      event = "Revision cycle reset by manager. Previous revision comments archived.";
+      break;
+    }
     case "revision-comment": {
+      if (p.revisionCommentsClosed || p.revisionAcknowledgedCycles?.includes(reviewCycleCount(p)) || p.revisionComment?.trim())
+        throw Error("Submitted revision comments are read-only.");
+      if (reviewCycleCount(p) >= 3)
+        throw Error("All three review cycles are finished. Revision comments are read-only.");
       if (productStatusLabel(p.status) === "To do")
         throw Error("Revision comments are available after the To do stage.");
+      if (productStatusLabel(p.status) !== "Review")
+        throw Error("Revision comments are read-only outside Review.");
       if (!reviewer && !(role === "3D Artist" && owner))
         throw Error("Only a manager, reviewer, or assigned artist can edit revision comments.");
       const comment = action.comment.trim();
@@ -48,6 +94,28 @@ export function transition(
         throw Error("Keep the revision comment within 2,000 characters.");
       next.revisionComment = comment;
       event = comment ? `Revision comment updated: ${comment}` : "Revision comment cleared.";
+      break;
+    }
+    case "acknowledge-revision": {
+      const cycle = reviewCycleCount(p);
+      if (p.revisionCommentsClosed || productStatusLabel(p.status) !== "In Progress" || cycle < 1 || cycle > 3)
+        throw Error("A revision can only be acknowledged in In Progress after Review.");
+      if (!admin && !(role === "3D Artist" && owner))
+        throw Error("Only a manager or the assigned artist can acknowledge revisions.");
+      next.revisionAcknowledgedCycles = [...new Set([...(p.revisionAcknowledgedCycles || []), cycle])];
+      if (cycle === 3) {
+        next.revisionCommentsClosed = true;
+        next.status = "Completed";
+        next.reviewStatus = "Approved";
+        next.approvedAt = now;
+        event = "Client revision 3 acknowledged. Task completed.";
+      } else {
+        next.status = "In Review";
+        next.reviewStatus = "Pending review";
+        next.submittedAt = now;
+        next.approvedAt = null;
+        event = `Client revision ${cycle} acknowledged. Returned to Review.`;
+      }
       break;
     }
     case "sync-model": {
@@ -132,7 +200,7 @@ export function transition(
     case "details": {
       if (
         !admin &&
-        (role !== "3D Artist" ||
+        !(p.singleProductDraft && role === "3D Artist") && (role !== "3D Artist" ||
           !owner ||
           !["In Progress", "Corrections Required", "Claimed"].includes(
             p.status,
@@ -265,12 +333,10 @@ export function transition(
       next = {
         ...next,
         assigneeId: action.assigneeId,
-        status: action.assigneeId ? "In Progress" : "Available",
-        claimedAt: action.assigneeId ? now : null,
       };
       event = action.assigneeId
         ? "Task reassigned by manager."
-        : "Task returned to available.";
+        : "Task unassigned by manager.";
       break;
     case "status":
       if (role === "Reviewer" || (!admin && !owner))
@@ -293,8 +359,22 @@ export function transition(
   }
   if (productStatusLabel(p.status) !== "To do" && productStatusLabel(next.status) === "To do")
     throw Error("A task cannot return to To do after it has moved to another state.");
+  const cycle = reviewCycleCount(p);
+  if (action.type !== "reset-revisions") next.reviewCycleCount = cycle;
+  if (productStatusLabel(next.status) === "Review" && productStatusLabel(p.status) !== "Review") {
+    if (cycle >= 3) {
+      next.revisionCommentsClosed = true;
+    } else {
+      next.reviewCycleCount = cycle + 1;
+    if (cycle > 0) {
+      next.revisionHistory = [...(p.revisionHistory || []), { cycle, comment: p.revisionComment || p.reviewComment || "" }];
+      next.revisionComment = "";
+    }
+    }
+  }
   return {
     ...next,
+    ...(requiresUnpublished(next.status) ? { consoleStatus: "Draft" as const } : {}),
     activity: [{ text: event, at: now }, ...p.activity].slice(0, 30),
   };
 }

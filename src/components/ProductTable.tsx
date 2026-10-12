@@ -9,13 +9,16 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ListFilter,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConsoleStatus, Product, Role } from "../lib/types";
 import { team } from "../lib/seed";
 import { ModelPreviewIcon } from "./Brand";
 import ModelFileLink from "./ModelFileLink";
+import ThemedSelect from "./ThemedSelect";
 import { isLocalModel } from "../lib/modelReference";
+import { requiresUnpublished } from "../lib/productStatus";
 import {
   Avatar,
   Empty,
@@ -23,6 +26,7 @@ import {
   Modal,
   ProductImage,
   StatusBadge,
+  SearchField,
 } from "./UI";
 export default function ProductTable({
   products: allProducts,
@@ -38,7 +42,15 @@ export default function ProductTable({
   catalogEmpty = false,
   initialConsoleFilter = "All",
   initialProductId,
+  search,
+  onImport,
+  resetConsoleFilterKey,
+  onBulkDelete,
 }: {
+  search?: { value: string; onChange: (value: string) => void };
+  onImport?: () => void;
+  resetConsoleFilterKey?: number;
+  onBulkDelete?: (ids: string[]) => Promise<void>;
   initialConsoleFilter?: ConsoleStatus | "All";
   initialProductId?: string;
   catalogEmpty?: boolean;
@@ -62,6 +74,7 @@ export default function ProductTable({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [updating, setUpdating] = useState(false);
   const [consoleError, setConsoleError] = useState("");
+  const [bulkDeleting, setBulkDeleting] = useState<Product[] | null>(null);
   const products = allProducts.filter(
     (p) =>
       consoleFilter === "All" || (p.consoleStatus ?? "Draft") === consoleFilter,
@@ -70,12 +83,22 @@ export default function ProductTable({
   const [page, setPage] = useState(() =>
     Math.floor(Math.max(0, products.findIndex((p) => p.id === initialProductId)) / size),
   );
+  const lastFilterReset = useRef(resetConsoleFilterKey);
+  useEffect(() => {
+    if (lastFilterReset.current === resetConsoleFilterKey) return;
+    lastFilterReset.current = resetConsoleFilterKey;
+    setConsoleFilter("All");
+    setPage(0);
+    setSelectedIds(new Set());
+    setConsoleError("");
+  }, [resetConsoleFilterKey]);
   const selected = products.filter((p) => selectedIds.has(p.id));
   const canSelect = role === "Admin / Manager";
   const allPublished = selected.length > 0 && selected.every((p) => p.consoleStatus === "Published");
   const allUnpublished = selected.length > 0 && selected.every((p) => p.consoleStatus !== "Published");
+  const canPublish = allUnpublished && selected.every((p) => !requiresUnpublished(p.status));
   async function changeConsoleStatus(status: ConsoleStatus) {
-    if (updating || !canSelect || (status === "Draft" ? !allPublished : !allUnpublished)) return;
+    if (updating || !canSelect || (status === "Draft" ? !allPublished : !canPublish)) return;
     setUpdating(true);
     setConsoleError("");
     try {
@@ -127,46 +150,32 @@ export default function ProductTable({
   return (
     <>
       <div className="console-list-toolbar">
-        <div
-          className="console-list-filters"
-          role="group"
-          aria-label="Filter by console status"
-        >
-          {(["All", "Published", "Draft"] as const).map((status) => (
-            <button
-              key={status}
-              type="button"
-              aria-pressed={consoleFilter === status}
+        <div className="catalog-search-filter-row">
+          {search && <SearchField value={search.value} onChange={search.onChange} />}
+          <div className="catalog-console-filter">
+            <ListFilter className="catalog-filter-icon" size={18} aria-hidden="true" />
+            <ThemedSelect
+              label="Console status filter"
+              value={consoleFilter}
               disabled={updating}
-              onClick={() => {
-                setConsoleFilter(status);
+              options={[
+                { value: "All", label: "Console status: All" },
+                { value: "Published", label: `Published (${allProducts.filter(p => p.consoleStatus === "Published").length})` },
+                { value: "Draft", label: `Unpublished (${allProducts.filter(p => (p.consoleStatus ?? "Draft") === "Draft").length})` },
+              ]}
+              onChange={(status) => {
+                setConsoleFilter(status as ConsoleStatus | "All");
                 setPage(0);
                 setSelectedIds(new Set());
                 setConsoleError("");
               }}
-            >
-              {status === "All" ? "All console statuses" : status === "Draft" ? "Unpublished" : status}
-              <span>
-                {
-                  allProducts.filter(
-                    (p) =>
-                      status === "All" ||
-                      (p.consoleStatus ?? "Draft") === status,
-                  ).length
-                }
-              </span>
-            </button>
-          ))}
+            />
+          </div>
         </div>
         {canSelect && selected.length > 0 && (
           <div className="console-bulk-actions" role="region" aria-label="Bulk publishing actions" aria-busy={updating}>
             <div className="console-bulk-copy" role="status">
               <strong>{selected.length} {selected.length === 1 ? "SKU" : "SKUs"} selected</strong>
-              <span>{allPublished
-                ? "Use published-only selections to unpublish products."
-                : allUnpublished
-                  ? "Use unpublished-only selections to publish products."
-                  : "Select only published or only unpublished products to continue."}</span>
             </div>
             <div className="console-bulk-buttons">
               {selected.length < products.length && (
@@ -179,6 +188,10 @@ export default function ProductTable({
                 onClick={() => { setSelectedIds(new Set()); setConsoleError(""); }}>
                 <X size={16} /> Clear
               </button>
+              {onBulkDelete && <button type="button" className="console-bulk-submit" disabled={updating}
+                onClick={() => { setConsoleError(""); setBulkDeleting([...selected]); }}>
+                <Trash2 size={16} /> Delete {selected.length}
+              </button>}
               {(allPublished || !allUnpublished) && (
                 <button type="button" className="console-bulk-submit" disabled={updating || !allPublished}
                   onClick={() => void changeConsoleStatus("Draft")}>
@@ -186,7 +199,7 @@ export default function ProductTable({
                 </button>
               )}
               {(allUnpublished || !allPublished) && (
-                <button type="button" className="console-bulk-submit" disabled={updating || !allUnpublished}
+                <button type="button" className="console-bulk-submit" disabled={updating || !canPublish}
                   onClick={() => void changeConsoleStatus("Published")}>
                   <Eye size={16} /> {updating ? "Publishing…" : `Publish ${selected.length}`}
                 </button>
@@ -249,7 +262,7 @@ export default function ProductTable({
             {!products.length && (
               <tr className="product-table-empty-row">
                 <td colSpan={10 + Number(canSelect) + (compact ? 0 : 2) + Number(!compact && !completed)}>
-                  <Empty text={catalogEmpty ? "Import your catalog to view products." : undefined} />
+                  <Empty text={catalogEmpty ? <>{onImport ? <button type="button" className="catalog-empty-import" onClick={onImport}>Import</button> : "Import"} your catalog to view products.</> : undefined} />
                 </td>
               </tr>
             )}
@@ -459,6 +472,26 @@ export default function ProductTable({
           </button>
         </nav>
       </footer>
+      {bulkDeleting && <Modal title={`Delete ${bulkDeleting.length} products?`} onClose={() => { if (!updating) setBulkDeleting(null); }}>
+        <div className="modal-body">
+          <p>The selected products will be removed from the catalog. This cannot be undone.</p>
+          {consoleError && <p className="error-banner" role="alert">{consoleError}</p>}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="button secondary" disabled={updating} onClick={() => setBulkDeleting(null)}>Cancel</button>
+          <button type="button" className="button danger" disabled={updating} onClick={async () => {
+            if (!onBulkDelete) return;
+            setUpdating(true);
+            try {
+              await onBulkDelete(bulkDeleting.map((p) => p.id));
+              setSelectedIds(new Set());
+              setBulkDeleting(null);
+              setPage(0);
+            } catch (error) { setConsoleError((error as Error).message); }
+            finally { setUpdating(false); }
+          }}><Trash2 size={16} />{updating ? "Deleting…" : `Delete ${bulkDeleting.length} products`}</button>
+        </div>
+      </Modal>}
       {deleting && (
         <Modal
           title="Delete product?"

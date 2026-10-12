@@ -43,12 +43,19 @@ export interface TeamMember {
   status: "Online" | "Away";
 }
 export interface Product {
+  singleProductDraft?: boolean;
+  discardedSingleProductDraft?: boolean;
   source?: "manual-generation";
   hiddenReferenceUrls?: string[];
   consoleStatus?: ConsoleStatus;
   isDemo?: boolean;
   holdReason?: string;
   revisionComment?: string;
+  reviewCycleCount?: number;
+  revisionAcknowledgedCycles?: number[];
+  revisionCommentsClosed?: boolean;
+  revisionHistory?: { cycle: number; comment: string }[];
+  revisionCycleArchives?: { at: string; cycle: number; comment: string; history: { cycle: number; comment: string }[] }[];
   id: string;
   category: string;
   sku: string;

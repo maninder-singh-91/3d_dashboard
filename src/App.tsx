@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
 } from "react";
 import {
@@ -34,6 +35,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { ConsoleStatus, Product, Role, Status } from "./lib/types";
 import { productStatusLabel, productStatusOptions } from "./lib/productStatus";
+import { completionNotifications, revisionNotifications, generationNotificationKey, loadGenerationNotifications } from "./lib/generationNotifications";
 import { repository } from "./lib/repository";
 import { team } from "./lib/seed";
 import type { Action } from "./lib/workflow";
@@ -52,37 +54,25 @@ import SortMenu from "./components/SortMenu";
 import ProfileMenu from "./components/ProfileMenu";
 import ImportProducts from "./components/ImportProducts";
 import ImportProductsMenu from "./components/ImportProductsMenu";
-import AddSingleProduct from "./components/AddSingleProduct";
+import { newProduct } from "./lib/imports";
 import TaskDetail from "./components/TaskDetail";
 import BatchGeneration from "./components/BatchGeneration";
 import GenerationWorkspace from "./components/GenerationWorkspace";
 import GenerationSelectionModal from "./components/GenerationSelectionModal";
 import GenerationStartModal from "./components/GenerationStartModal";
-import GenerationSettingsModal from "./components/GenerationSettingsModal";
-import { defaultModelGenerationSettings, saveBatchModelGenerationSettings } from "./lib/modelGenerationSettings";
+import { defaultModelGenerationSettings, loadModelGenerationSettings, saveBatchModelGenerationSettings } from "./lib/modelGenerationSettings";
 import { prepareManualProducts } from "./lib/manualGeneration";
 import GenerationBatch, {
   GenerationBatchHeader,
 } from "./components/GenerationBatch";
 import {
-  emptyGenerationSelection,
   generationSelectionReducer,
   selectedProducts,
+  generationDisplayStatus,
+  generationDisplayProgress,
 } from "./lib/generationSelection";
+import { loadNavigation, navigationKey, type Page } from "./lib/workspaceNavigation";
 const ModelViewer = lazy(() => import("./components/ModelViewer"));
-type Page =
-  | "Dashboard"
-  | "3D Generation"
-  | "Products"
-  | "Batch Render"
-  | "My Tasks"
-  | "Unassigned"
-  | "In Review"
-  | "Completed"
-  | "Team"
-  | "Reports"
-  | "Settings"
-  | "Batches";
 type Filters = {
   status: string;
   category: string;
@@ -140,25 +130,29 @@ export default function App({
   organisation = "GLAMAR",
   onLogout,
   onChangeOrganisation,
+  startOnAssets = false,
 }: {
   organisation?: string;
   onLogout?: () => void;
   onChangeOrganisation?: () => void;
+  startOnAssets?: boolean;
 }) {
   const [db, setDb] = useState(() => repository.read());
   const [role, setRole] = useState<Role>(loadRole);
   const [userId, setUserId] = useState(
     () => sessionStorage.getItem("modello.user") || "maninder",
   );
-  const [page, setPage] = useState<Page>("Dashboard");
+  const [initialNavigation] = useState(() => loadNavigation(organisation, db.products, startOnAssets));
+  const [page, setPage] = useState<Page>(initialNavigation.page);
   const [publishedProductId, setPublishedProductId] = useState<string>();
+  const [totalProductsReset, setTotalProductsReset] = useState(0);
   const [generationFlow, generationDispatch] = useReducer(
     generationSelectionReducer,
-    emptyGenerationSelection,
+    initialNavigation.generationFlow,
   );
   const [generationSelectionOpen, setGenerationSelectionOpen] = useState(false);
+  const [generationExistingProduct, setGenerationExistingProduct] = useState<Product | undefined>();
   const [generationStartOpen, setGenerationStartOpen] = useState(false);
-  const [generationSettingsOpen, setGenerationSettingsOpen] = useState(false);
   const [generationBatchSettings, setGenerationBatchSettings] = useState({ ...defaultModelGenerationSettings });
   const [generationSource, setGenerationSource] = useState<
     "catalog" | "manual"
@@ -170,24 +164,46 @@ export default function App({
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState("Recently added");
   const [grid, setGrid] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialNavigation.selected);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(navigationKey(organisation), JSON.stringify({ page, selected, generationFlow }));
+    } catch { /* Navigation remains usable when browser storage is unavailable. */ }
+  }, [organisation, page, selected, generationFlow]);
   const [preview, setPreview] = useState<Product | null>(null);
   const [importing, setImporting] = useState(false);
-  const [addingSingle, setAddingSingle] = useState(false);
+  const [creatingSingle, setCreatingSingle] = useState(false);
   const [toast, setToast] = useState<{
     message: string;
     error: boolean;
   } | null>(null);
   const [notifications, setNotifications] = useState(false);
+  const [generationNotifications, setGenerationNotifications] = useState(() => loadGenerationNotifications(organisation));
+  const previousGenerationResults = useRef(initialNavigation.generationFlow.results);
+  const previousRevisionProducts = useRef(db.products);
   const [help, setHelp] = useState(false);
   const [batchModal, setBatchModal] = useState(false);
   const [batchName, setBatchName] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const user = team.find((t) => t.id === userId) || team[0];
-  const products = db.products;
+  const products = db.products.filter((p) => !p.singleProductDraft && !p.discardedSingleProductDraft);
+  useEffect(() => {
+    const previous = previousGenerationResults.current;
+    previousGenerationResults.current = generationFlow.results;
+    setGenerationNotifications(existing => completionNotifications(previous, generationFlow.results, db.products, existing));
+  }, [generationFlow.results, db.products]);
+  useEffect(() => {
+    const previous = previousRevisionProducts.current;
+    previousRevisionProducts.current = db.products;
+    setGenerationNotifications(existing => revisionNotifications(previous, db.products, existing));
+  }, [db.products]);
+  useEffect(() => {
+    try { localStorage.setItem(generationNotificationKey(organisation), JSON.stringify(generationNotifications)); }
+    catch { /* Notifications stay available in this session. */ }
+  }, [organisation, generationNotifications]);
   const generationSelected = useMemo(
-    () => selectedProducts(generationFlow.selectedProductIds, products),
-    [generationFlow.selectedProductIds, products],
+    () => selectedProducts(generationFlow.selectedProductIds, products).filter((p) => ![...(generationFlow.submittedProductIds || []), ...generationFlow.batchProductIds].includes(p.id)),
+    [generationFlow, products],
   );
   const generationBatch = useMemo(
     () => selectedProducts(generationFlow.batchProductIds, products),
@@ -204,7 +220,7 @@ export default function App({
     (id: string) => generationDispatch({ type: "open", id }),
     [],
   );
-  const activeProduct = products.find((p) => p.id === selected);
+  const activeProduct = db.products.find((p) => p.id === selected && !p.discardedSingleProductDraft);
   const count = (s: string) =>
     products.filter(
       (p) => productStatusLabel(p.status) === productStatusLabel(s),
@@ -232,6 +248,18 @@ export default function App({
     setSelected(null);
     setQuery("");
     setMenuOpen(false);
+  }
+  async function addSingleProduct() {
+    if (creatingSingle) return;
+    setCreatingSingle(true);
+    try {
+      const product = newProduct({ singleProductDraft: true, category: "Unspecified", batchId: `manual-${crypto.randomUUID().slice(0, 8)}`, consoleStatus: "Draft" });
+      await repository.import([product]);
+      navigate("Dashboard");
+      setSelected(product.id);
+    } catch (error) {
+      notify((error as Error).message || "Could not create the product. Please try again.", true);
+    } finally { setCreatingSingle(false); }
   }
   function changeRole(value: Role) {
     setRole(value);
@@ -415,6 +443,11 @@ export default function App({
     notify("Production report exported");
   }
   const tableProps = {
+    onBulkDelete: async (ids: string[]) => {
+      await repository.removeMany(ids, role);
+      notify(`${ids.length} products deleted`);
+    },
+    onImport: () => setImporting(true),
     catalogEmpty: products.length === 0,
     products: filtered,
     onConsoleStatusChange: async (ids: string[], status: ConsoleStatus) => {
@@ -661,7 +694,7 @@ export default function App({
                       ).length
                     : 0;
             const isActive =
-              generationSelectionOpen || generationStartOpen || generationSettingsOpen
+              generationSelectionOpen || generationStartOpen
                 ? p === "3D Generation"
                 : page === p;
             return (
@@ -734,10 +767,11 @@ export default function App({
             <button
               className="notification-button icon-button"
               aria-label="Notifications"
+              title={generationNotifications.some(item => !item.read) ? "New workspace updates" : "Notifications"}
               onClick={() => setNotifications(!notifications)}
             >
               <Bell size={18} />
-              <i />
+              {(generationNotifications.some(item => !item.read) || products.some(p => ["In Review", "Corrections Required"].includes(p.status))) && <i />}
             </button>
             <ProfileMenu
               user={user}
@@ -757,6 +791,20 @@ export default function App({
                   <X size={16} />
                 </button>
               </div>
+              {generationNotifications.map(item => <button type="button" key={item.id}
+                disabled={!products.some(product => product.id === item.productId)}
+                onClick={() => {
+                  setGenerationNotifications(current => current.map(notification => notification.id === item.id ? { ...notification, read: true } : notification));
+                  setSelected(item.productId);
+                  setNotifications(false);
+                }}>
+                <span className={`notification-dot${item.read ? " notification-read" : ""}`} />
+                <span><strong>{item.name}</strong>
+                  <small>{item.kind === "revision" ? `New revision comment · Client Revision ${item.cycle}/3` : `3D generation completed · SKU ${item.sku}`}</small>
+                  {item.kind === "revision" && <small className="notification-comment-preview">{item.comment}</small>}
+                </span>
+                <ChevronRight size={15} />
+              </button>)}
               {products
                 .filter((p) =>
                   ["In Review", "Corrections Required"].includes(p.status),
@@ -782,7 +830,7 @@ export default function App({
                     <ChevronRight size={15} />
                   </button>
                 ))}
-              {!products.some((p) =>
+              {!generationNotifications.length && !products.some((p) =>
                 ["In Review", "Corrections Required"].includes(p.status),
               ) && <p>You’re all caught up.</p>}
             </div>
@@ -790,7 +838,9 @@ export default function App({
         </header>
         <main
           className={
-            page === "3D Generation" && !activeProduct
+            page === "Dashboard" && !activeProduct
+              ? "catalog-page"
+              : page === "3D Generation" && !activeProduct
               ? "generation-page"
               : undefined
           }
@@ -803,6 +853,13 @@ export default function App({
               userId={userId}
               batches={db.batches}
               onBack={() => setSelected(null)}
+              onGenerate={() => {
+                const product = repository.read().products.find(product => product.id === activeProduct.id) || activeProduct;
+                setGenerationExistingProduct(product);
+                setGenerationSource("manual");
+                setGenerationBatchSettings(loadModelGenerationSettings(product.id));
+                setGenerationSelectionOpen(true);
+              }}
               onUpdate={(a) => update(activeProduct.id, a)}
               onPublish={async () => {
                 await tableProps.onConsoleStatusChange([activeProduct.id], "Published");
@@ -829,6 +886,10 @@ export default function App({
                     {page === "Dashboard" ? <p>{organisation === "GLAMAR" ? "GlamAR" : organisation}</p> : pageText[page][1] && <p>{pageText[page][1]}</p>}
                   </div>
                   <div className="row heading-actions">
+                    {page === "Dashboard" && generationBatch.length > 0 && <button type="button" className="button secondary" onClick={() => {
+                      generationDispatch({ type: "back" });
+                      navigate("3D Generation");
+                    }}>Generation Queue</button>}
                     {role === "Admin / Manager" &&
                       ![
                         "Settings",
@@ -836,7 +897,7 @@ export default function App({
                         "Batch Render",
                         "3D Generation",
                       ].includes(page) && (
-                        <ImportProductsMenu onSingle={() => setAddingSingle(true)} onBulk={() => setImporting(true)} />
+                        <ImportProductsMenu disabled={creatingSingle} onSingle={() => void addSingleProduct()} onBulk={() => setImporting(true)} />
                       )}
                     {page === "Team" && (
                       <button
@@ -855,9 +916,17 @@ export default function App({
                   <div className="kpi-grid">
                     {cards.map(({ label, status }) => (
                       <button
-                        className="kpi-card"
+                        className={`kpi-card${filters.status === status ? " selected" : ""}`}
+                        aria-pressed={filters.status === status}
                         key={label}
-                        onClick={() => setFilters({ ...blankFilters, status })}
+                        onClick={() => {
+                          setFilters({ ...blankFilters, status });
+                          if (!status) {
+                            setPublishedProductId(undefined);
+                            setQuery("");
+                            setTotalProductsReset((value) => value + 1);
+                          }
+                        }}
                       >
                         <div className="kpi-top">
                           {status ? (
@@ -873,72 +942,9 @@ export default function App({
                     ))}
                   </div>
                   <section className="panel products-panel">
-                    <div className="section-title table-title">
-                      <div>
-                        <h3>Product overview</h3>
-                      </div>
-                    </div>
-                    <div className="table-tabs">
-                      <button
-                        className={!filters.status ? "active" : ""}
-                        onClick={() => setFilters(blankFilters)}
-                      >
-                        All products<span>{products.length}</span>
-                      </button>
-                      <button
-                        className={
-                          filters.status === "Available" ? "active" : ""
-                        }
-                        onClick={() =>
-                          setFilters({ ...blankFilters, status: "Available" })
-                        }
-                      >
-                        To do<span>{count("Available")}</span>
-                      </button>
-                      <button
-                        className={
-                          filters.status === "In Progress" ? "active" : ""
-                        }
-                        onClick={() =>
-                          setFilters({ ...blankFilters, status: "In Progress" })
-                        }
-                      >
-                        In Progress<span>{count("In Progress")}</span>
-                      </button>
-                      <button
-                        className={
-                          filters.status === "In Review" ? "active" : ""
-                        }
-                        onClick={() =>
-                          setFilters({ ...blankFilters, status: "In Review" })
-                        }
-                      >
-                        Review<span>{count("In Review")}</span>
-                      </button>
-                      <button
-                        className={filters.status === "On Hold" ? "active" : ""}
-                        onClick={() =>
-                          setFilters({ ...blankFilters, status: "On Hold" })
-                        }
-                      >
-                        Hold<span>{count("On Hold")}</span>
-                      </button>
-                      <button
-                        className={
-                          filters.status === "Completed" ? "active" : ""
-                        }
-                        onClick={() =>
-                          setFilters({ ...blankFilters, status: "Completed" })
-                        }
-                      >
-                        Done<span>{count("Completed")}</span>
-                      </button>
-                      <div className="table-tab-spacer" />
-                    </div>
-                    <div className="filter-toolbar">
-                      <SearchField value={query} onChange={setQuery} />
-                    </div>
                     <ProductTable {...tableProps} compact
+                      resetConsoleFilterKey={totalProductsReset}
+                      search={{ value: query, onChange: setQuery }}
                       initialConsoleFilter={publishedProductId ? "Published" : "All"}
                       initialProductId={publishedProductId} />
                   </section>
@@ -1189,8 +1195,9 @@ export default function App({
                   {!generationActive && (
                     <GenerationBatchHeader
                       count={generationBatch.length}
-                      onBack={() => setGenerationSelectionOpen(true)}
+                      onBack={() => { generationDispatch({ type: "begin-selection" }); setGenerationSelectionOpen(true); }}
                       onSelect={() => setGenerationStartOpen(true)}
+                      onListing={() => navigate("Dashboard")}
                     />
                   )}
                   {generationActive ? (
@@ -1198,6 +1205,12 @@ export default function App({
                       key={generationActive.id}
                       products={products}
                       activeProduct={generationActive}
+                      jobStatus={generationDisplayStatus(generationFlow.results[generationActive.id], generationBatch.findIndex(product => product.id === generationActive.id))}
+                      jobProgress={generationDisplayProgress(generationFlow.results[generationActive.id], generationBatch.findIndex(product => product.id === generationActive.id))}
+                      onCancel={() => {
+                        generationDispatch({ type: "cancel", id: generationActive.id });
+                        notify("Queued generation canceled.");
+                      }}
                       onSync={async (url, file) => {
                         await repository.syncModel(generationActive.id, generationActive.sku, url, file, userId, role);
                       }}
@@ -1215,6 +1228,10 @@ export default function App({
                       products={generationBatch}
                       results={generationFlow.results}
                       onOpen={openGenerationProduct}
+                      onCancel={id => {
+                        generationDispatch({ type: "cancel", id });
+                        notify("Queued generation canceled.");
+                      }}
                     />
                   ) : (
                     <Empty
@@ -1580,8 +1597,15 @@ export default function App({
       </div>
       {generationStartOpen && (
         <GenerationStartModal
+          onQueue={() => {
+            setGenerationStartOpen(false);
+            setGenerationSelectionOpen(false);
+            generationDispatch({ type: "back" });
+            navigate("3D Generation");
+          }}
           onClose={() => setGenerationStartOpen(false)}
           onChoose={(source) => {
+            setGenerationExistingProduct(undefined);
             setGenerationSource(source);
             setGenerationStartOpen(false);
             setGenerationSelectionOpen(true);
@@ -1590,20 +1614,43 @@ export default function App({
       )}
       {generationSelectionOpen && (
         <GenerationSelectionModal
+          product={generationExistingProduct}
           source={generationSource}
+          settings={generationBatchSettings}
+          onSettingsChange={setGenerationBatchSettings}
           onBack={() => {
             setGenerationSelectionOpen(false);
-            setGenerationStartOpen(true);
+            if (!generationExistingProduct) setGenerationStartOpen(true);
           }}
           onUpload={async (files) => {
+            if (files.length !== 1) throw Error("Upload images for one product at a time.");
+            if (generationExistingProduct) {
+              const current = repository.read().products.find(product => product.id === generationExistingProduct.id);
+              if (!current) throw Error("This product is no longer available.");
+              const [prepared] = await prepareManualProducts([{ ...files[0], productUid: current.id, sku: current.sku }],
+                repository.read().products.filter(product => product.id !== current.id), id => `generation:${id}`);
+              const details = { name: prepared.name, brand: prepared.brand, category: prepared.category, productUrl: prepared.productUrl, specifications: prepared.specifications! };
+              if (JSON.stringify(details) !== JSON.stringify({ name: current.name, brand: current.brand, category: current.category, productUrl: current.productUrl, specifications: current.specifications })) {
+                await repository.update(current.id, { type: "details", details }, userId, role);
+              }
+              saveBatchModelGenerationSettings([current.id], generationBatchSettings);
+              generationDispatch({ type: "single", id: current.id, products: repository.read().products });
+              setGenerationSelectionOpen(false);
+              navigate("3D Generation");
+              return;
+            }
             const uploaded = await prepareManualProducts(files, repository.read().products);
+            saveBatchModelGenerationSettings(uploaded.map(product => product.id), generationBatchSettings);
             await repository.import(uploaded);
+            generationDispatch({ type: "single", id: uploaded[0].id, products: repository.read().products });
+            setGenerationSelectionOpen(false);
+            navigate("3D Generation");
             setGenerationSearch("");
             notify(
-              `${uploaded.length} products uploaded. Select them to continue.`,
+              `${uploaded.length} products added to the generation queue.`,
             );
           }}
-          products={products}
+          products={products.filter((p) => ![...(generationFlow.submittedProductIds || []), ...generationFlow.batchProductIds].includes(p.id))}
           batches={db.batches}
           selected={generationSelected}
           batch={generationBatchFilter}
@@ -1615,37 +1662,13 @@ export default function App({
           onClose={() => setGenerationSelectionOpen(false)}
           onProceed={() => {
             if (!generationSelected.length) return;
+            saveBatchModelGenerationSettings(generationSelected.map(product => product.id), generationBatchSettings);
+            if (generationSource === "manual") generationDispatch({ type: "single", id: generationSelected[0].id, products });
+            else generationDispatch({ type: "proceed", products });
             setGenerationSelectionOpen(false);
-            setGenerationSettingsOpen(true);
-          }}
-        />
-      )}
-      {generationSettingsOpen && (
-        <GenerationSettingsModal
-          count={generationSelected.length}
-          value={generationBatchSettings}
-          onChange={setGenerationBatchSettings}
-          onBack={() => {
-            setGenerationSettingsOpen(false);
-            setGenerationSelectionOpen(true);
-          }}
-          onClose={() => setGenerationSettingsOpen(false)}
-          onProceed={() => {
-            if (!generationSelected.length) return;
-            saveBatchModelGenerationSettings(generationSelected.map((product) => product.id), generationBatchSettings);
-            generationDispatch({ type: "proceed", products });
-            setGenerationSettingsOpen(false);
             navigate("3D Generation");
           }}
         />
-      )}
-      {addingSingle && (
-        <AddSingleProduct onClose={() => setAddingSingle(false)} onAdd={async (inputs) => {
-          const uploaded = await prepareManualProducts(inputs, repository.read().products);
-          await repository.import(uploaded);
-          notify("Product added successfully");
-          navigate("Dashboard");
-        }} />
       )}
       {importing && (
         <ImportProducts

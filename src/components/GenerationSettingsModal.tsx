@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Modal } from "./UI";
 import GenerationSettingsFields from "./GenerationSettingsFields";
 import { CreditSummary } from "./GenerationSelectionModal";
-import type { ModelGenerationSettings } from "../lib/modelGenerationSettings";
+import { generationCredits, type ModelGenerationSettings } from "../lib/modelGenerationSettings";
 import "../generation-workspace.css";
 
 export default function GenerationSettingsModal({
@@ -48,13 +48,13 @@ export default function GenerationSettingsModal({
           </p>
         )}
       </div>
-      <CreditSummary count={count} />
+      <CreditSummary count={count} perProduct={generationCredits(value)} />
       <footer className="generation-selection-footer">
-        <span>No credits charged in demo</span>
+        <span>Up to 15 products per run. Review outputs before generating more.</span>
         <button
           type="button"
           className="button primary"
-          disabled={!count}
+          disabled={!count || count > 15}
           onClick={() => {
             try {
               onProceed();

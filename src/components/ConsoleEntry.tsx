@@ -18,6 +18,7 @@ function initialStep(): EntryStep {
 export default function ConsoleEntry() {
   const [step, setStep] = useState<EntryStep>(initialStep);
   const [hasWorkspace, setHasWorkspace] = useState(() => initialStep() === "workspace");
+  const [workspaceSelection, setWorkspaceSelection] = useState(0);
   const [organisation, setOrganisation] = useState(() => {
     try {
       const stored = sessionStorage.getItem(organisationKey);
@@ -43,11 +44,12 @@ export default function ConsoleEntry() {
   }} />;
   return <>
     {hasWorkspace && <div hidden={step === "organisation"}>
-      <App key={organisation} organisation={organisation} onLogout={logout} onChangeOrganisation={() => setStep("organisation")} />
+      <App key={`${organisation}:${workspaceSelection}`} organisation={organisation} startOnAssets={workspaceSelection > 0} onLogout={logout} onChangeOrganisation={() => setStep("organisation")} />
     </div>}
     {step === "organisation" && <OrganisationScreen
       onSelect={(selected) => {
         setOrganisation(selected);
+        setWorkspaceSelection(value => value + 1);
         try { sessionStorage.setItem(organisationKey, selected); } catch { /* Keep selection in memory. */ }
         persist("active"); setHasWorkspace(true); setStep("workspace");
       }}

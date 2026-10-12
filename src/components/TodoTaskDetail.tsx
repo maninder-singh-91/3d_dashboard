@@ -3,22 +3,20 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
-  Copy,
   ImagePlus,
   Images,
-  Trash2,
-  Link2,
   Check,
   Download,
   LoaderCircle,
+  Sparkles,
   X,
 } from "lucide-react";
 import type { Batch, Product, Role } from "../lib/types";
 import type { Action } from "../lib/workflow";
-import { validUrl } from "../lib/workflow";
 import { loadReferences, saveReferences } from "../lib/referenceImages";
 import { MAX_REFERENCE_IMAGES, referenceError } from "../lib/generation";
 import { createImageArchive } from "../lib/downloadImages";
+import { Modal } from "./UI";
 import { productGallery } from "../lib/productGallery";
 import { productStatusLabel, productStatusOptions } from "../lib/productStatus";
 import TaskStatusButtons from "./TaskStatusButtons";
@@ -67,6 +65,7 @@ export default function TodoTaskDetail({
   role,
   userId,
   onBack,
+  onGenerate,
   onUpdate,
   onCopy,
 }: {
@@ -75,6 +74,7 @@ export default function TodoTaskDetail({
   userId: string;
   batches: Batch[];
   onBack: () => void;
+  onGenerate: () => void;
   onUpdate: (action: Action) => Promise<void>;
   onCopy: (value: string, kind?: "url" | "uid") => void;
 }) {
@@ -87,13 +87,14 @@ export default function TodoTaskDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [holdReason, setHoldReason] = useState(p.holdReason || "");
   const [reasonSaved, setReasonSaved] = useState(false);
   const detailsSave = useRef<{ save: () => Promise<boolean> }>(null);
   const commentsSave = useRef<{ save: () => Promise<boolean> }>(null);
   const [headerSaved, setHeaderSaved] = useState(false);
+  const [leavePrompt, setLeavePrompt] = useState(false);
+  const [detailsEntered, setDetailsEntered] = useState(false);
   useEffect(() => {
     setHoldReason(p.holdReason || "");
   }, [p.id, p.holdReason]);
@@ -165,11 +166,9 @@ export default function TodoTaskDetail({
     if (locked) return;
     setBusy(true);
     setError("");
-    setSaved(false);
     try {
       await saveReferences(p.id, next);
       setFiles(next);
-      setSaved(true);
       return true;
     } catch {
       setError(
@@ -189,10 +188,8 @@ export default function TodoTaskDetail({
     } else {
       setBusy(true);
       setError("");
-      setSaved(false);
       try {
         await onUpdate({ type: "remove-reference", url: image.url });
-        setSaved(true);
       } catch (error) {
         setError((error as Error).message);
         return;
@@ -298,17 +295,30 @@ export default function TodoTaskDetail({
     try {
       if (await detailsSave.current?.save() === false) return;
       if (await commentsSave.current?.save() === false) return;
+      if (p.singleProductDraft) {
+        await onUpdate({ type: "finish-single-product", hasImages: images.length > 0, hasDetails: detailsEntered });
+      }
       if (onHold && editable && holdReason.trim() !== (p.holdReason || "")) {
         await onUpdate({ type: "hold-reason", reason: holdReason });
         setHoldReason(holdReason.trim());
         setReasonSaved(true);
       }
       setHeaderSaved(true);
+      return true;
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+  async function discardDraft() {
+    setBusy(true);
+    try {
+      await onUpdate({ type: "discard-single-product" });
+      onBack();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally { setBusy(false); }
   }
   const picture = selected ? (
     <img
@@ -340,7 +350,7 @@ export default function TodoTaskDetail({
           ) : (
             <span>Upload images</span>
           )}
-          <small>Add product images to get started.</small>
+          <small>Drag and drop images here, or upload to get started.</small>
         </>
       ) : (
         <span>No product images yet</span>
@@ -354,7 +364,7 @@ export default function TodoTaskDetail({
       onChangeCapture={() => setHeaderSaved(false)}
     >
       <header className="todo-heading">
-        <button className="back-button" onClick={onBack}>
+        <button className="back-button" onClick={() => p.singleProductDraft ? setLeavePrompt(true) : onBack()}>
           <ArrowLeft size={18} /> Back
         </button>
         <h1 title={p.name}>{p.name}</h1>
@@ -371,40 +381,7 @@ export default function TodoTaskDetail({
           className="todo-gallery panel"
           aria-label="Product image gallery"
         >
-          <div className="todo-url-toolbar">
-            {validUrl(p.productUrl) ? (
-              <>
-                <a
-                  href={p.productUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={p.productUrl}
-                >
-                  <Link2 size={19} />
-                  <span>{p.productUrl}</span>
-                </a>
-                <button
-                  className="icon-button"
-                  aria-label="Copy product URL"
-                  onClick={() => onCopy(p.productUrl)}
-                >
-                  <Copy size={18} />
-                </button>
-              </>
-            ) : (
-              <span className="muted">No product URL added</span>
-            )}
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={downloading ? "Preparing image download" : "Download product images"}
-              title="Download product images"
-              disabled={downloading || !loaded || busy || !images.length}
-              onClick={() => void downloadImages()}
-            >
-              {downloading ? <LoaderCircle size={19} className="ai-spinner" /> : <Download size={19} />}
-            </button>
-          </div>
+
           <div
             className={`todo-image-stage${dragging ? " dragging" : ""}`}
             tabIndex={0}
@@ -421,9 +398,12 @@ export default function TodoTaskDetail({
             }}
             onDragOver={(e) => {
               e.preventDefault();
+              e.dataTransfer.dropEffect = locked ? "none" : "copy";
               if (!locked) setDragging(true);
             }}
-            onDragLeave={() => setDragging(false)}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+            }}
             onDrop={(e) => {
               e.preventDefault();
               setDragging(false);
@@ -431,6 +411,10 @@ export default function TodoTaskDetail({
             }}
           >
             {picture}
+            {dragging && <div className="todo-image-drop-overlay" aria-live="polite">
+              <ImagePlus size={36} />
+              <span>Drop images to upload</span>
+            </div>}
             {images.length > 1 && (
               <>
                 <button
@@ -509,18 +493,13 @@ export default function TodoTaskDetail({
                 </button>
               )}
             </div>
-          </div>
-          {selected?.fileIndex >= 0 && editable && (
-            <div className="todo-gallery-bottom">
-              <button
-                className="text-button"
-                disabled={locked}
-                onClick={() => void removeImage(selectedIndex)}
-              >
-                <Trash2 size={14} /> Remove image
+            <div className="todo-gallery-actions">
+              <button type="button" className="button secondary download-images-button" disabled={downloading || !loaded || busy || !images.length} onClick={() => void downloadImages()}>
+                {downloading ? <LoaderCircle size={16} className="ai-spinner" /> : <Download size={16} />}
+                {downloading ? "Preparing download…" : "Download Images"}
               </button>
             </div>
-          )}
+          </div>
           <input
             ref={input}
             hidden
@@ -536,7 +515,8 @@ export default function TodoTaskDetail({
         <aside className="todo-settings-column">
           <section className="todo-info panel" aria-label="Task status">
             <dl>
-              <TaskAssignee assigneeId={p.assigneeId} />
+              <TaskAssignee assigneeId={p.assigneeId} canAssign={role === "Admin / Manager" && !p.singleProductDraft}
+                onAssign={(assigneeId) => onUpdate({ type: "assign", assigneeId })} />
               <div>
                 <dt>Status</dt>
                 <dd className="todo-status-select">
@@ -615,25 +595,37 @@ export default function TodoTaskDetail({
           </section>
           <ProductSpecifications
             saveRef={detailsSave}
+            onChange={() => { setHeaderSaved(false); setDetailsEntered(true); }}
             initiallyOpen
             product={p}
-            editable={role === "Admin / Manager" || (role === "3D Artist" && p.assigneeId === userId && ["Claimed", "In Progress", "Corrections Required"].includes(p.status))}
+            editable={role === "Admin / Manager" || (role === "3D Artist" && (p.singleProductDraft || (p.assigneeId === userId && ["Claimed", "In Progress", "Corrections Required"].includes(p.status))))}
             onUpdate={onUpdate}
             onCopy={(value) => onCopy(value, "uid")}
           />
-          <RevisionComments saveRef={commentsSave} product={p} role={role} userId={userId} onUpdate={onUpdate} />
-          {saved && (
-            <p className="todo-saved" role="status">
-              <Check size={14} /> Images saved
-            </p>
-          )}
+          <button type="button" className="button primary generate-product-button"
+            disabled={locked || !images.length}
+            title={!images.length ? "Add product images to generate a model" : undefined}
+            onClick={async () => { if (await saveTask()) onGenerate(); }}>
+            <Sparkles size={18} /> Generate with AI
+          </button>
         </aside>
+        <RevisionComments saveRef={commentsSave} product={p} role={role} userId={userId} onUpdate={onUpdate} />
       </div>
       {error && (
         <div className="error-banner" role="alert">
           {error}
         </div>
       )}
+      {leavePrompt && <Modal title="Save changes?" subtitle="Save this product to the listing or discard this draft." onClose={() => setLeavePrompt(false)}>
+        <div className="modal-body">
+          <p>{images.length || detailsEntered ? "You have unsaved changes." : "This product is empty. Add images or details before saving."}</p>
+          {error && <p className="error-banner" role="alert">{error}</p>}
+          <div className="row" style={{ gap: 12, justifyContent: "flex-end" }}>
+            <button type="button" className="button secondary" disabled={busy} onClick={() => void discardDraft()}>Discard</button>
+            <button type="button" className="button primary" disabled={busy || (!images.length && !detailsEntered)} onClick={async () => { if (await saveTask()) onBack(); }}>Save changes</button>
+          </div>
+        </div>
+      </Modal>}
     </div>
   );
 }

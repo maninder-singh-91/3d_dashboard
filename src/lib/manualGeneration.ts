@@ -1,7 +1,7 @@
 import { newProduct } from "./imports";
 import { referenceError } from "./generation";
 import { saveReferences } from "./referenceImages";
-import type { Product } from "./types";
+import type { Product, ProductSpecifications } from "./types";
 
 export type ManualDimensions = {
   length: string;
@@ -11,18 +11,30 @@ export type ManualDimensions = {
 };
 export type ManualProductInput = {
   file: File;
+  files?: File[];
   sku?: string;
   productUid?: string;
+  name?: string;
+  brand?: string;
+  category?: string;
+  productUrl?: string;
+  specifications?: Partial<ProductSpecifications>;
   dimensions: ManualDimensions;
 };
 
 export async function prepareManualProducts(
   inputs: ManualProductInput[],
   existing: Pick<Product, "id" | "sku">[] = [],
+  referenceKey: (productId: string) => string = id => id,
 ) {
   const skus = new Set(existing.map((product) => product.sku.toLowerCase()));
   const uids = new Set(existing.map((product) => product.id.toLowerCase()));
   for (const input of inputs) {
+    if (input.productUrl?.trim()) {
+      try {
+        if (!["http:", "https:"].includes(new URL(input.productUrl.trim()).protocol)) throw Error();
+      } catch { throw Error("Enter a valid HTTP or HTTPS product URL."); }
+    }
     for (const [label, value, used] of [
       ["SKU", input.sku?.trim(), skus],
       ["Product UID", input.productUid?.trim(), uids],
@@ -35,12 +47,14 @@ export async function prepareManualProducts(
       used.add(value.toLowerCase());
     }
   }
-  const files = inputs.map((input) => input.file);
-  if (files.length > 15)
-    throw Error("Upload up to 15 product images at a time.");
+  const references = inputs.map(input => input.files?.length ? input.files : [input.file]);
+  const files = references.flat();
+  if (inputs.length > 15)
+    throw Error("Upload up to 15 products at a time.");
   for (const file of files) {
     const error = referenceError(file);
     if (error) throw Error(error);
+
   }
   for (const { dimensions } of inputs) {
     if (!["cm", "mm", "m", "in", "ft"].includes(dimensions.unit))
@@ -51,9 +65,18 @@ export async function prepareManualProducts(
         throw Error("Dimensions must be positive numbers.");
     }
   }
+  for (const file of files) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      bitmap.close();
+    } catch {
+      throw Error(`“${file.name}” could not be opened. Choose a valid image.`);
+    }
+  }
   const batchId = `manual-${crypto.randomUUID().slice(0, 8)}`;
   const products = [];
-  for (const { file, dimensions, sku, productUid } of inputs) {
+  for (const [index, { dimensions, sku, productUid, name, brand, category, productUrl, specifications }] of inputs.entries()) {
+    const file = references[index][0];
     let bitmap: ImageBitmap;
     try {
       bitmap = await createImageBitmap(file);
@@ -76,8 +99,10 @@ export async function prepareManualProducts(
     const product = newProduct({
       ...(sku?.trim() ? { sku: sku.trim() } : {}),
       ...(productUid?.trim() ? { id: productUid.trim() } : {}),
-      name: file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "),
-      category: "Uncategorised",
+      name: name?.trim() || file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "),
+      brand: brand?.trim() || "Unspecified",
+      category: category?.trim() || "Uncategorised",
+      productUrl: productUrl?.trim() || "",
       imageUrl: canvas.toDataURL("image/jpeg", 0.85),
       batchId,
       source: "manual-generation",
@@ -91,6 +116,7 @@ export async function prepareManualProducts(
         material: "",
         price: "",
         currency: "",
+        ...specifications,
         length: dimensions.length.trim(),
         width: dimensions.width.trim(),
         height: dimensions.height.trim(),
@@ -99,8 +125,8 @@ export async function prepareManualProducts(
     });
     products.push(product);
   }
-  for (let index = 0; index < files.length; index++) {
-    await saveReferences(products[index].id, [files[index]]);
+  for (let index = 0; index < inputs.length; index++) {
+    await saveReferences(referenceKey(products[index].id), references[index]);
   }
   return products;
 }

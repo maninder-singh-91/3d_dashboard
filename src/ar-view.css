@@ -1,0 +1,5 @@
+.ar-view-page { min-height: 100dvh; margin: 0; padding: 20px; display: flex; flex-direction: column; background: #fff; }
+.ar-view-page h1 { font-size: 20px; margin: 0 0 16px; }
+.ar-view-page model-viewer { width: 100%; flex: 1; min-height: 65dvh; position: relative; }
+.ar-view-page [slot="ar-button"] { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
+.ar-view-page p { text-align: center; font-size: 13px; color: #686870; }

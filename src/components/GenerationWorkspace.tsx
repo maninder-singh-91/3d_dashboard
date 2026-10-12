@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   Box,
+  Clock,
   ArrowLeft,
   Check,
   Download,
@@ -8,6 +9,7 @@ import {
   ImagePlus,
   History,
   RotateCcw,
+  Trash2,
   SlidersHorizontal,
   Upload,
   Video,
@@ -15,7 +17,6 @@ import {
 } from "lucide-react";
 import type { Product } from "../lib/types";
 import {
-  CREDITS_PER_PRODUCT,
   type GenerationResult,
 } from "../lib/generationSelection";
 import { DEMO_MODEL_URL } from "../lib/batchGeneration";
@@ -32,9 +33,12 @@ import {
 } from "../lib/modelFiles";
 import ThemedSelect from "./ThemedSelect";
 import GenerationSettingsFields from "./GenerationSettingsFields";
-import { loadModelGenerationSettings, modelGenerationSettingsKey } from "../lib/modelGenerationSettings";
+import { generationCredits, generationPrompt, loadModelGenerationSettings, modelGenerationSettingsKey } from "../lib/modelGenerationSettings";
 import { ProductImage } from "./UI";
 import { useModelUrl } from "../lib/useModelUrl";
+import { LOCAL_MODEL_PREFIX } from "../lib/modelReference";
+import { appendGenerationHistory, generationHistoryKey, loadGenerationHistory, withoutQueuedPlaceholder } from "../lib/generationHistory";
+import GenerationHistoryCard from "./GenerationHistoryCard";
 import "../generation-workspace.css";
 
 const ModelStage = lazy(() =>
@@ -48,13 +52,22 @@ export default function GenerationWorkspace({
   onBack,
   onStatusChange,
   onSync,
+  jobStatus,
+  jobProgress,
+  onCancel,
 }: {
   products: Product[];
   activeProduct?: Product;
   onBack?: () => void;
   onStatusChange?: (result: GenerationResult) => void;
   onSync?: (url: string, file?: File) => Promise<void>;
+  jobStatus?: string;
+  jobProgress?: number;
+  onCancel?: () => void;
 }) {
+  const queued = jobStatus === "In Queue";
+  const generating = jobStatus === "In progress";
+  const waiting = queued || generating;
   const settingsKey = activeProduct
     ? `glamar.video-render.settings.v1.${activeProduct.id}`
     : "glamar.video-render.settings.v1";
@@ -62,7 +75,11 @@ export default function GenerationWorkspace({
   const generationSettingsKey = modelGenerationSettingsKey(modelKey);
   const [generationSettings, setGenerationSettings] = useState(() => loadModelGenerationSettings(modelKey));
   const [generationNotice, setGenerationNotice] = useState("");
-  const generationSettingsHeading = useRef<HTMLHeadingElement>(null);
+  const [generationHistory, setGenerationHistory] = useState(() => loadGenerationHistory(modelKey));
+  const [selectedGeneration, setSelectedGeneration] = useState(() => loadGenerationHistory(modelKey).filter((entry) => !entry.deleted).at(-1)?.id || "");
+  const [checkedGenerations, setCheckedGenerations] = useState<string[]>([]);
+  const [lastDeletedGenerations, setLastDeletedGenerations] = useState<string[]>(() => loadGenerationHistory(modelKey).filter((entry) => entry.deleted).map((entry) => entry.id));
+
   const [settings, setSettings] = useState(() => {
     try {
       return restoreRenderSettings(
@@ -79,7 +96,7 @@ export default function GenerationWorkspace({
   const [logo, setLogo] = useState<{ url: string; name: string }>();
   const [musicFile, setMusicFile] = useState<File>();
   const [controlsOpen, setControlsOpen] = useState(false);
-  const [regenerateRequested, setRegenerateRequested] = useState(false);
+
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -94,7 +111,19 @@ export default function GenerationWorkspace({
   const product = activeProduct || catalog.find((p) => p.id === modelId);
   const productModelUrl =
     modelId === "upload" ? localUrl : product?.modelUrl || localUrl;
-  const modelSource = productModelUrl || DEMO_MODEL_URL;
+  const selectedHistoryEntry = generationHistory.find((entry) => entry.id === selectedGeneration);
+  const visibleHistory = (queued ? withoutQueuedPlaceholder(generationHistory) : generationHistory).filter((entry) => !entry.deleted);
+  useEffect(() => {
+    if (!queued) return;
+    const history = withoutQueuedPlaceholder(generationHistory);
+    if (history.length === generationHistory.length) return;
+    try {
+      localStorage.setItem(generationHistoryKey(modelKey), JSON.stringify(history));
+      setGenerationHistory(history);
+      setSelectedGeneration(history.filter(entry => !entry.deleted).at(-1)?.id || "");
+    } catch { setError("Generation history could not be updated."); }
+  }, [queued, generationHistory, modelKey]);
+  const modelSource = selectedHistoryEntry?.modelUrl || productModelUrl || DEMO_MODEL_URL;
   const { url: modelUrl, error: modelResolutionError } = useModelUrl(modelSource);
   const isSampleModel = modelUrl === DEMO_MODEL_URL;
   useEffect(() => setModelScreenshot(""), [modelUrl]);
@@ -134,6 +163,59 @@ export default function GenerationWorkspace({
     setLocalUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [modelFile]);
+  useEffect(() => {
+    if (waiting || modelLoading || generationHistory.length || (modelFile && !localUrl)) return;
+    const source = modelFile ? `${LOCAL_MODEL_PREFIX}${modelKey}` : productModelUrl || DEMO_MODEL_URL;
+    if (source.startsWith("blob:")) return;
+    try {
+      const next = appendGenerationHistory([], { modelUrl: source, settings: generationSettings, thumbnail: modelScreenshot, preview: source === DEMO_MODEL_URL, origin: source === DEMO_MODEL_URL && jobStatus !== "Completed" ? "initial" : "generated" });
+      localStorage.setItem(generationHistoryKey(modelKey), JSON.stringify(next));
+      setGenerationHistory(next);
+      setSelectedGeneration(next[0].id);
+    } catch { setError("Generation history could not be saved."); }
+  }, [jobStatus, waiting, modelLoading, generationHistory.length, modelFile, localUrl, modelKey, productModelUrl, generationSettings, modelScreenshot]);
+  useEffect(() => {
+    if (!modelScreenshot || !selectedHistoryEntry || selectedHistoryEntry.thumbnail) return;
+    const next = generationHistory.map((entry) => entry.id === selectedGeneration ? { ...entry, thumbnail: modelScreenshot } : entry);
+    try {
+      localStorage.setItem(generationHistoryKey(modelKey), JSON.stringify(next));
+      setGenerationHistory(next);
+    } catch { /* Keep the model selectable if thumbnail storage is full. */ }
+  }, [modelScreenshot, selectedGeneration, selectedHistoryEntry, generationHistory, modelKey]);
+  async function regenerate() {
+    if (generating || busy || modelLoading) return;
+    setBusy(true);
+    setError("");
+    try {
+      let source = modelSource;
+      if (source.startsWith("blob:")) {
+        if (!modelFile) throw Error("Upload a model before adding a preview generation.");
+        const fileKey = crypto.randomUUID();
+        await saveModelFile(fileKey, modelFile);
+        source = `${LOCAL_MODEL_PREFIX}${fileKey}`;
+      }
+      const next = appendGenerationHistory(generationHistory, { modelUrl: source, settings: generationSettings, thumbnail: modelScreenshot, preview: true, origin: "generated" });
+      localStorage.setItem(generationHistoryKey(modelKey), JSON.stringify(next));
+      setGenerationHistory(next);
+      setSelectedGeneration(next.at(-1)!.id);
+      setSaved(false);
+      setGenerationNotice("Preview generation added using the displayed model. AI generation is not connected yet.");
+      onStatusChange?.({ status: "Completed", outputUrl: source, generationId: next.at(-1)!.id, message: "Demo preview generated." });
+    } catch (error) { setError((error as Error).message || "Generation history could not be saved."); }
+    finally { setBusy(false); }
+  }
+  function deleteHistory(undo = false) {
+    const ids = undo ? lastDeletedGenerations : checkedGenerations;
+    if (!ids.length) return;
+    const next = generationHistory.map((entry) => ids.includes(entry.id) ? { ...entry, deleted: !undo } : entry);
+    try {
+      localStorage.setItem(generationHistoryKey(modelKey), JSON.stringify(next));
+      setGenerationHistory(next);
+      if (!undo && ids.includes(selectedGeneration)) setSelectedGeneration(next.filter((entry) => !entry.deleted).at(-1)?.id || "");
+      setLastDeletedGenerations(undo ? [] : ids);
+      setCheckedGenerations([]);
+    } catch { setError("Generation history could not be updated. Please try again."); }
+  }
   useEffect(
     () => () => {
       if (logo) URL.revokeObjectURL(logo.url);
@@ -153,7 +235,7 @@ export default function GenerationWorkspace({
       localStorage.setItem(settingsKey, JSON.stringify(settings));
       localStorage.setItem(
         generationSettingsKey,
-        JSON.stringify(generationSettings),
+        JSON.stringify({ ...generationSettings, resolvedPrompt: generationPrompt(generationSettings) }),
       );
       await onSync(modelSource, modelSource === localUrl ? modelFile : undefined);
       setSaved(true);
@@ -197,6 +279,13 @@ export default function GenerationWorkspace({
     try {
       await validateModelFile(file);
       await saveModelFile(modelKey, file);
+      const historyFileKey = crypto.randomUUID();
+      await saveModelFile(historyFileKey, file);
+      const next = appendGenerationHistory(generationHistory, { modelUrl: `${LOCAL_MODEL_PREFIX}${historyFileKey}`,
+        settings: generationSettings, thumbnail: "", preview: false, origin: "imported" });
+      localStorage.setItem(generationHistoryKey(modelKey), JSON.stringify(next));
+      setGenerationHistory(next);
+      setSelectedGeneration(next.at(-1)!.id);
       setModelFile(file);
       setModelId("upload");
     } catch (e) {
@@ -220,6 +309,14 @@ export default function GenerationWorkspace({
     );
   }
   function stage(expanded = false) {
+    if (queued) return <div className="generation-queued-stage"><Clock size={32} aria-hidden="true" /><span role="status">In Queue</span>
+      {onCancel && <button type="button" className="generation-queue-cancel" onClick={onCancel}>Cancel Generation</button>}
+    </div>;
+    if (generating) return <div className="generation-queued-stage generation-progress-stage">
+      <span role="status">Generation in progress</span>
+      <progress aria-label="Generation progress" max={100} value={jobProgress} />
+      {jobProgress !== undefined && <span>{jobProgress}%</span>}
+    </div>;
     if (!modelUrl)
       return (
         <div className="generation-missing-model">
@@ -292,7 +389,8 @@ export default function GenerationWorkspace({
           )}
         </div>
         <div className="row">
-          <button className="button primary" onClick={() => void sync()} disabled={syncing || modelLoading || busy || !onSync || !modelUrl}>
+          {onBack && <button type="button" className="button secondary" onClick={onBack}>Generation Queue</button>}
+          <button className="button primary" onClick={() => void sync()} disabled={waiting || syncing || modelLoading || busy || !onSync || !modelUrl}>
             {syncing ? "Syncing…" : saved ? (
               <>
                 <Check size={16} /> Synced
@@ -344,15 +442,15 @@ export default function GenerationWorkspace({
             )}
             <button
               type="button"
-              className="button secondary"
-              disabled={downloading}
+              className="button primary"
+              disabled={waiting || downloading}
               onClick={() => void downloadModel()}
               title={isSampleModel ? "Download the sample model shown in the viewer" : "Download the model shown in the viewer"}
             >
               <Download size={16} />
               {downloading ? "Downloading…" : "Download 3D model"}
             </button>
-            {isSampleModel && <small>Sample model · GLB</small>}
+            {!waiting && isSampleModel && <small>Sample model · GLB</small>}
             <input
               type="file"
               hidden
@@ -365,74 +463,51 @@ export default function GenerationWorkspace({
               }}
             />
           </section>
+          <section className="panel generation-history">
+            <h3 className="generation-history-heading">
+              <History size={17} /> Generation history
+              <button type="button" className="icon-button" aria-label="Delete selected generations" title="Delete selected generations"
+                disabled={!checkedGenerations.length} onClick={() => deleteHistory()}><Trash2 size={17} /></button>
+            </h3>
+            <div className="generation-history-list">
+              {visibleHistory.map((entry) => <GenerationHistoryCard key={entry.id} entry={entry}
+                checked={checkedGenerations.includes(entry.id)} onCheck={() => setCheckedGenerations((ids) => ids.includes(entry.id) ? ids.filter((id) => id !== entry.id) : [...ids, entry.id])}
+                selected={entry.id === selectedGeneration} onSelect={() => { setSelectedGeneration(entry.id); setSaved(false); }} />)}
+            </div>
+            {!visibleHistory.length && <p className="generation-history-note">No generations yet.</p>}
+            {!!lastDeletedGenerations.length && <button type="button" className="text-button generation-history-undo" onClick={() => deleteHistory(true)}>Undo delete</button>}
+          </section>
         </aside>
         <div className="generation-preview-column">
           <section className="panel generation-viewport">{stage()}</section>
-          <section className="panel generation-history">
-            <h3>
-              <History size={17} /> Generation history
-            </h3>
-            <div className="generation-history-row">
-              {modelScreenshot ? (
-                <img
-                  className="generation-history-thumbnail"
-                  src={modelScreenshot}
-                  alt={`Screen grab of ${isSampleModel ? "the sample studio chair" : modelName} 3D model`}
-                  style={{ background }}
-                />
-              ) : (
-                <span className="generation-history-placeholder">
-                  <Box size={24} />
-                </span>
-              )}
-              <div className="generation-history-copy">
-                <strong>Previously generated model</strong>
-                <small>Demo preview</small>
-              </div>
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => {
-                  setRegenerateRequested(true);
-                  generationSettingsHeading.current?.focus();
-                }}
-              >
-                <RotateCcw size={14} /> Re-Generate
-              </button>
-            </div>
-            {regenerateRequested && (
-              <p role="status" className="generation-history-note">
-                Choose your generation settings, then select Re-Generate.
-              </p>
-            )}
-          </section>
+
         </div>
-        <aside className="panel generation-model-settings">
-          <h3 ref={generationSettingsHeading} tabIndex={-1}>
+        <aside className={`panel generation-model-settings${waiting ? " generation-settings-disabled" : ""}`}>
+          <h3>
             <SlidersHorizontal size={18} /> Generation settings
           </h3>
           <div className="generation-model-settings-body">
+            <fieldset className="generation-settings-fields" disabled={waiting} aria-label="Generation settings controls">
             <GenerationSettingsFields value={generationSettings} onChange={(value) => {
+              if (waiting) return;
               setGenerationSettings(value);
               setSaved(false);
               setGenerationNotice("");
             }} />
+            </fieldset>
             <div className="generation-credit-consumption">
               <h4>Credit Consumption</h4>
               <div>
-                <span>1 product × {CREDITS_PER_PRODUCT} credits</span>
-                <strong>{CREDITS_PER_PRODUCT} credits</strong>
+                <span>1 product × {generationCredits(generationSettings)} credits</span>
+                <strong>{generationCredits(generationSettings)} credits</strong>
               </div>
-              <small>Per regeneration · No credits charged in demo</small>
+              <small>Per generation</small>
             </div>
             <button
               type="button"
               className="button primary generation-regenerate"
-              onClick={() =>
-                setGenerationNotice(
-                  "Demo preview only. Model generation is not connected yet.",
-                )
-              }
+              disabled={waiting || busy || modelLoading}
+              onClick={() => void regenerate()}
             >
               <RotateCcw size={16} /> Re-Generate
             </button>

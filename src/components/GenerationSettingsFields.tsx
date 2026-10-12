@@ -1,6 +1,10 @@
 import {
   modelTypes,
   textureSizes,
+  polyCounts,
+  modelCredits,
+  textureCredits,
+  polyCountCredits,
   type ModelGenerationSettings,
 } from "../lib/modelGenerationSettings";
 
@@ -14,15 +18,16 @@ export default function GenerationSettingsFields({
   return (
     <>
       <label className="generation-field generation-prompt">
-        <span>Prompt</span>
+        <span>Prompt (optional)</span>
         <textarea
           rows={4}
-          placeholder="Describe how you want to generate or refine the 3D model…"
+          placeholder="Add custom specifications if needed…"
           value={value.prompt}
           onChange={(event) =>
             onChange({ ...value, prompt: event.target.value })
           }
         />
+        <small>A predefined prompt is used by default. Custom specifications are added to it.</small>
       </label>
       <div className="generation-field">
         <span>Model Type</span>
@@ -38,12 +43,17 @@ export default function GenerationSettingsFields({
               aria-pressed={value.modelType === modelType}
               onClick={() => onChange({ ...value, modelType })}
             >
-              {modelType}
+              {modelType} <small>({modelCredits[modelType]} credits)</small>
             </button>
           ))}
         </div>
       </div>
-      <div className="generation-field">
+      <div className="generation-mesh-option">
+        <span>Texture</span>
+        <button type="button" role="switch" aria-label="Texture" aria-checked={value.textureEnabled}
+          className="generation-mesh-toggle" onClick={() => onChange({ ...value, textureEnabled: !value.textureEnabled })}><span /></button>
+      </div>
+      {value.textureEnabled && <div className="generation-field">
         <span>Texture Size</span>
         <div
           className="generation-model-options generation-texture-options"
@@ -57,11 +67,11 @@ export default function GenerationSettingsFields({
               aria-pressed={value.textureSize === textureSize}
               onClick={() => onChange({ ...value, textureSize })}
             >
-              {textureSize}
+              {textureSize} <small>(+{textureCredits[textureSize]})</small>
             </button>
           ))}
         </div>
-      </div>
+      </div>}
       <div className="generation-mesh-option">
         <span>Mesh Optimisation</span>
         <button
@@ -77,6 +87,13 @@ export default function GenerationSettingsFields({
           <span />
         </button>
       </div>
+      {value.meshOptimisation && <div className="generation-field">
+        <span>Poly count</span>
+        <div className="generation-model-options" role="group" aria-label="Poly count">
+          {polyCounts.map((polyCount) => <button type="button" key={polyCount}
+            aria-pressed={value.polyCount === polyCount} onClick={() => onChange({ ...value, polyCount })}>{polyCount}<small>(+{polyCountCredits[polyCount]})</small></button>)}
+        </div>
+      </div>}
     </>
   );
 }

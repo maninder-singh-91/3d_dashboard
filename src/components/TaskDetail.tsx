@@ -36,6 +36,7 @@ export default function TaskDetail({
   userId,
   batches,
   onBack,
+  onGenerate,
   onUpdate,
   onPublish,
   onCopy,
@@ -45,6 +46,7 @@ export default function TaskDetail({
   userId: string;
   batches: Batch[];
   onBack: () => void;
+  onGenerate: () => void;
   onUpdate: (a: Action) => Promise<void>;
   onPublish: () => Promise<void>;
   onCopy: (value: string, kind?: "url" | "uid") => void;
@@ -100,6 +102,7 @@ export default function TaskDetail({
   if (["To do", "In Progress", "Hold"].includes(productStatusLabel(p.status))) {
     return (
       <TodoTaskDetail
+        onGenerate={onGenerate}
         product={p}
         role={role}
         userId={userId}

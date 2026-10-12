@@ -137,7 +137,7 @@
 }
 .login-signup button {
   border: 0;
-  background: var(--accent);
+  background: #111;
   color: white;
   border-radius: 24px;
   padding: 10px 20px;
@@ -253,7 +253,7 @@
   border: 0;
   border-radius: 26px;
   min-height: 48px;
-  background: var(--accent);
+  background: #111;
   color: white;
   display: flex;
   align-items: center;
@@ -263,7 +263,7 @@
 }
 .login-submit:hover,
 .login-signup button:hover {
-  background: var(--accent-hover);
+  background: #292929;
 }
 .login-demo-note {
   font-size: 11px;
@@ -525,4 +525,12 @@
   .organisation-selector { padding: 24px 20px; }
   .organisation-selector-heading h1 { font-size: 23px; }
   .organisation-selector .organisation-list { max-height: min(402px, 48dvh); }
+}
+
+/* Use black actions while retaining white secondary buttons. */
+.login-screen button,
+.organisation-screen button {
+  --accent: #111;
+  --accent-hover: #292929;
+  --accent-soft: #f1f1f3;
 }

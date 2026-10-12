@@ -88,7 +88,7 @@ export function Empty({
   action,
 }: {
   title?: string;
-  text?: string;
+  text?: ReactNode;
   action?: ReactNode;
 }) {
   return (
