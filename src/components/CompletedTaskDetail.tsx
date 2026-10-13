@@ -1,15 +1,17 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Box,
   Check,
   Download,
+  Copy,
+  QrCode,
+  X,
   Trash2,
 } from "lucide-react";
 import type { Product, Role } from "../lib/types";
 import type { Action } from "../lib/workflow";
 import type { ViewerSettings, MaterialSetting } from "./ModelViewer";
-import { Modal } from "./UI";
 import ProductSpecifications from "./ProductSpecifications";
 import ProductDetailsCard from "./ProductDetailsCard";
 import RevisionComments from "./RevisionComments";
@@ -93,13 +95,33 @@ export default function CompletedTaskDetail({
   onBack: () => void;
   onUpdate: (a: Action) => Promise<void>;
   onPublish: () => Promise<void>;
-  onCopy: (value: string, kind?: "url" | "uid") => void;
+  onCopy: (value: string, kind?: "url" | "uid" | "product-url") => void;
 }) {
   const hdri = useHdri(p.id);
   const hdriInput = useRef<HTMLInputElement>(null);
-  const settingsColumn = useRef<HTMLElement>(null);
-  const modelPanel = useRef<HTMLElement>(null);
   const detailsSave = useRef<{ save: () => Promise<boolean> }>(null);
+  const modelPanel = useRef<HTMLElement>(null);
+  const settingsColumn = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const viewer = modelPanel.current;
+    const column = settingsColumn.current;
+    const details = column?.querySelector<HTMLElement>(".product-specifications");
+    const form = details?.querySelector<HTMLFormElement>("form");
+    if (!viewer || !column || !details || !form) return;
+    const alignDetails = () => {
+      if (window.innerWidth <= 980) { form.style.removeProperty("height"); return; }
+      const available = viewer.getBoundingClientRect().bottom - details.getBoundingClientRect().top;
+      const heading = details.querySelector<HTMLElement>(".product-specifications-heading")?.getBoundingClientRect().height || 0;
+      form.style.height = `${Math.max(120, available - heading - 2)}px`;
+    };
+    const observer = new ResizeObserver(alignDetails);
+    observer.observe(viewer);
+    const status = column.querySelector(".todo-info");
+    if (status) observer.observe(status);
+    window.addEventListener("resize", alignDetails);
+    alignDetails();
+    return () => { observer.disconnect(); window.removeEventListener("resize", alignDetails); form.style.removeProperty("height"); };
+  }, [p.id, p.status]);
   const [saving, setSaving] = useState(false);
   const [localModel, setLocalModel] = useState<File>();
   const [localUrl, setLocalUrl] = useState("");
@@ -129,6 +151,9 @@ export default function CompletedTaskDetail({
     return () => URL.revokeObjectURL(url);
   }, [localModel]);
   const modelUrl = isLocalModel(p.modelUrl) ? localUrl : p.modelUrl || localUrl;
+  const [qrOpen, setQrOpen] = useState(false);
+  const shareUrl = arViewLink(localModel ? "" : p.modelUrl || modelUrl, window.location.origin, p.name);
+  const hostedModelUrl = modelUrl && !modelUrl.startsWith("blob:") ? new URL(modelUrl, window.location.origin).href : "";
   const [modelScreenshot, setModelScreenshot] = useState("");
   useEffect(() => { setModelScreenshot(""); }, [modelUrl]);
   const modelName =
@@ -142,32 +167,8 @@ export default function CompletedTaskDetail({
   const [publishError, setPublishError] = useState("");
   const isDone = productStatusLabel(p.status) === "Done";
   useEffect(() => { setSaved(false); }, [p.status]);
-  useEffect(() => {
-    const lighting = settingsColumn.current?.querySelector(".product-specifications");
-    const panel = modelPanel.current;
-    if (!lighting || !panel || isDone) return;
-    const alignViewer = () => {
-      if (window.innerWidth <= 980) {
-        panel.style.removeProperty("--model-stage-height");
-        return;
-      }
-      const height = lighting.getBoundingClientRect().bottom - panel.getBoundingClientRect().top
-        - 2;
-      panel.style.setProperty("--model-stage-height", `${Math.max(200, height)}px`);
-    };
-    const observer = new ResizeObserver(alignViewer);
-    observer.observe(lighting);
-    window.addEventListener("resize", alignViewer);
-    alignViewer();
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", alignViewer);
-      panel.style.removeProperty("--model-stage-height");
-    };
-  }, [isDone, localUrl, p.id]);
   const published = p.consoleStatus === "Published";
   const [error, setError] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [deletingModel, setDeletingModel] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const inReview = productStatusLabel(p.status) === "Review";
@@ -176,6 +177,7 @@ export default function CompletedTaskDetail({
     role === "Reviewer" ||
     (role === "3D Artist" && p.assigneeId === userId);
   async function deleteModel() {
+    if (deletingModel || !modelUrl || !canDeleteModel) return;
     setDeletingModel(true);
     setDeleteError("");
     const backups: { key: string; file: File | undefined }[] = [];
@@ -194,7 +196,6 @@ export default function CompletedTaskDetail({
       setLocalUrl("");
       setSettings(defaultSettings);
       setSaved(false);
-      setConfirmDelete(false);
     } catch (error) {
       if (removed.length) {
         try {
@@ -383,29 +384,21 @@ export default function CompletedTaskDetail({
                         : "Delete 3D model"
                   }
                   disabled={!modelUrl || !canDeleteModel || deletingModel}
-                  onClick={() => {
-                    setDeleteError("");
-                    setConfirmDelete(true);
-                  }}
+                  onClick={() => void deleteModel()}
                 >
                   <Trash2 size={17} />
                 </button>
               )}
             </div>
+            {deleteError && <p className="error-banner" role="alert">{deleteError}</p>}
             {modelUrl && (
-              <a className="button secondary model-card-download" href={modelUrl} download={modelName} target="_blank" rel="noreferrer" aria-label="Download model file">
-                <Download size={16} /> Download
+              <a className="button secondary model-card-download" href={modelUrl} download={modelName} target="_blank" rel="noreferrer" aria-label="Download GLB">
+                <Download size={16} /> Download GLB
               </a>
             )}
           </section>
 
-          {modelUrl && <section className="panel model-qr-panel">
-            <ModelQrCode
-              url={arViewLink(localModel ? "" : p.modelUrl || modelUrl, window.location.origin, p.name)
-                || arViewLink("/models/studio-chair.glb", window.location.origin, p.name)}
-              name={p.name}
-            />
-          </section>}
+
         </aside>
         <section
           ref={modelPanel}
@@ -417,9 +410,15 @@ export default function CompletedTaskDetail({
           ) : (
             <ModelImport productId={p.id} onImported={setLocalModel} />
           )}
-          {modelUrl === "/models/studio-chair.glb" && (
-            <span className="completed-sample">Sample model</span>
-          )}
+          {modelUrl && <div className="model-share-bar">
+            <input aria-label="3D model CDN URL" readOnly value={hostedModelUrl} placeholder="Upload to a CDN to get a shareable model URL" />
+            <button type="button" className="icon-button model-share-action" aria-label="Copy model URL" title="Copy model URL" disabled={!hostedModelUrl} onClick={() => onCopy(hostedModelUrl, "url")}><Copy size={18} /></button>
+            <button type="button" className="icon-button model-share-action" aria-label="Show model QR code" title="Show QR code" aria-expanded={qrOpen} disabled={!shareUrl} onClick={() => setQrOpen(open => !open)}><QrCode size={20} /></button>
+            {qrOpen && shareUrl && <div className="panel model-share-qr-popover">
+              <button type="button" className="icon-button model-share-qr-close" aria-label="Close model QR code" onClick={() => setQrOpen(false)}><X size={18} /></button>
+              <ModelQrCode url={shareUrl} name={p.name} />
+            </div>}
+          </div>}
         </section>
         <aside ref={settingsColumn} className="todo-settings-column">
           <ProductDetailsCard
@@ -433,7 +432,7 @@ export default function CompletedTaskDetail({
             saveRef={detailsSave}
             onChange={() => setSaved(false)}
             initiallyOpen
-            onCopy={(value) => onCopy(value, "uid")}
+            onCopy={(value, kind) => onCopy(value, kind || "uid")}
             product={p}
             editable={role === "Admin / Manager"}
             onUpdate={onUpdate}
@@ -446,47 +445,7 @@ export default function CompletedTaskDetail({
         </aside>
         <RevisionComments product={p} role={role} userId={userId} onUpdate={onUpdate} />
       </div>
-      {confirmDelete && (
-        <Modal
-          title="Delete 3D model?"
-          subtitle={p.name}
-          onClose={() => {
-            if (!deletingModel) setConfirmDelete(false);
-          }}
-        >
-          <div className="modal-body">
-            <p>
-              Remove this model from the product? You can upload a replacement
-              afterwards. Product details and the Review status will stay
-              unchanged.
-            </p>
-            {deleteError && (
-              <p className="error-banner" role="alert">
-                {deleteError}
-              </p>
-            )}
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="button secondary"
-              disabled={deletingModel}
-              onClick={() => setConfirmDelete(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="button primary"
-              disabled={deletingModel}
-              onClick={() => void deleteModel()}
-            >
-              <Trash2 size={16} />
-              {deletingModel ? "Deleting…" : "Delete model"}
-            </button>
-          </div>
-        </Modal>
-      )}
+
     </div>
   );
 }

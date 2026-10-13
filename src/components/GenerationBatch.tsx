@@ -1,8 +1,8 @@
+import ImportProductsMenu from "./ImportProductsMenu";
 import { memo, useState } from "react";
-import { ArrowLeft, Plus, Clock, LoaderCircle, CircleCheck, Layers3, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, Clock, LoaderCircle, CircleCheck, TriangleAlert, X, List, Columns3 } from "lucide-react";
 import type { Product } from "../lib/types";
 import {
-  MAX_GENERATION_PRODUCTS,
   generationDisplayStatus,
   generationDisplayProgress,
   type GenerationResult,
@@ -11,15 +11,11 @@ import { ProductImage, SearchField } from "./UI";
 import "../generation-selection.css";
 
 export function GenerationBatchHeader({
-  count,
   onBack,
   onSelect,
-  onListing,
 }: {
-  count: number;
   onBack: () => void;
-  onSelect: () => void;
-  onListing: () => void;
+  onSelect: (source: "catalog" | "manual") => void;
 }) {
   return (
     <div className="generation-batch-heading generation-reference-header">
@@ -30,10 +26,7 @@ export function GenerationBatchHeader({
         <h1>3D Generation</h1>
       </div>
       <div className="generation-header-actions">
-      <button className="button secondary" onClick={onSelect}>
-        <Plus size={15} /> Add Products · {count}/{MAX_GENERATION_PRODUCTS}
-      </button>
-      <button type="button" className="button primary" onClick={onListing}>Listing Page</button>
+      <ImportProductsMenu onBulk={() => onSelect("catalog")} onSingle={() => onSelect("manual")} />
       </div>
     </div>
   );
@@ -104,7 +97,7 @@ export default function GenerationBatch({
   onCancel?: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("All");
+  const [view, setView] = useState<"list" | "board">("board");
   const cards = products.map((product, index) => ({ product, index, status: generationDisplayStatus(results[product.id], index) }));
   const groups = [
     { name: "In Queue", key: "queued", icon: Clock, description: "Waiting to start", empty: "No products waiting", cards: cards.filter(card => card.status === "In Queue") },
@@ -113,23 +106,19 @@ export default function GenerationBatch({
     { name: "Needs attention", key: "attention", icon: TriangleAlert, description: "Review these generations", empty: "No issues", cards: cards.filter(card => card.status === "Failed" || card.status === "Needs attention") },
   ];
   const term = query.trim().toLowerCase();
-  const visibleGroups = groups.filter(group => (filter === "All" || filter === group.name) && (group.key !== "attention" || group.cards.length));
+  const visibleGroups = groups.filter(group => (group.key !== "attention" || group.cards.length));
   return <div className="generation-dashboard">
-    <div className="generation-dashboard-summary" aria-label="Generation overview">
-      <button type="button" className={`generation-metric metric-total${filter === "All" ? " active" : ""}`} aria-pressed={filter === "All"} onClick={() => setFilter("All")}>
-        <span><Layers3 size={18} />Total products</span><strong>{products.length}</strong><small>All generations in this run</small>
-      </button>
-      {groups.filter(group => group.key !== "attention" || group.cards.length).map(group => <button type="button" key={group.name}
-        className={`generation-metric metric-${group.key}${filter === group.name ? " active" : ""}`}
-        aria-pressed={filter === group.name} onClick={() => setFilter(filter === group.name ? "All" : group.name)}>
-        <span><group.icon size={18} />{group.name}</span><strong>{group.cards.length}</strong><small>{group.description}</small>
-      </button>)}
-    </div>
     <div className="generation-dashboard-toolbar">
       <div><h2>Generation overview</h2><p>Follow each product from queue to finished model.</p></div>
-      <SearchField value={query} onChange={setQuery} placeholder="Search products or SKU" />
+      <div className="generation-overview-actions">
+        <SearchField value={query} onChange={setQuery} placeholder="Search products or SKU" />
+        <div className="generation-view-toggle" role="group" aria-label="Generation view">
+          <button type="button" aria-label="List view" title="List view" aria-pressed={view === "list"} onClick={() => setView("list")}><List size={20} /></button>
+          <button type="button" aria-label="Board view" title="Board view" aria-pressed={view === "board"} onClick={() => setView("board")}><Columns3 size={20} /></button>
+        </div>
+      </div>
     </div>
-    <div className={`generation-status-groups${filter !== "All" ? " filtered" : ""}`}>
+    <div className={`generation-status-groups view-${view}`}>
       {visibleGroups.map(group => {
         const visible = group.cards.filter(({ product }) => `${product.name} ${product.sku}`.toLowerCase().includes(term));
         return <section className={`generation-status-group state-${group.key}`} key={group.name} aria-label={`${group.name} generations`}>

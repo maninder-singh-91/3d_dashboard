@@ -8,7 +8,7 @@ export const productInformationFields = [
 ] as const;
 
 export const specificationFields: {
-  key: keyof ProductSpecifications;
+  key: Exclude<keyof ProductSpecifications, "placement">;
   label: string;
   placeholder: string;
   numeric?: boolean;

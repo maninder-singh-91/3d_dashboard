@@ -14,6 +14,7 @@ export type Status = (typeof statuses)[number];
 export type ConsoleStatus = "Published" | "Draft";
 export type Role = "Admin / Manager" | "3D Artist" | "Reviewer";
 export interface ProductSpecifications {
+  placement?: "Floor" | "Wall";
   barcode: string;
   storefront: string;
   length: string;

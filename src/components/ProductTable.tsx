@@ -302,15 +302,6 @@ export default function ProductTable({
                       <span className="mono" title={p.id}>
                         {p.id}
                       </span>
-                      <button
-                        type="button"
-                        className="icon-button"
-                        aria-label={`Copy Product UID for ${p.name}`}
-                        title="Copy Product UID"
-                        onClick={() => onCopy(p.id, "uid")}
-                      >
-                        <Copy size={14} />
-                      </button>
                     </div>
                   </td>
                   {!compact && <td className="muted mono">{p.sku}</td>}

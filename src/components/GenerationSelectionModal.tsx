@@ -1,3 +1,5 @@
+import { validGenerationDimensions } from "../lib/generationDimensions";
+import { productSpecificationsOf } from "../lib/productSpecifications";
 import { memo, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Layers3, Trash2 } from "lucide-react";
 import type { Batch, Product } from "../lib/types";
@@ -88,6 +90,7 @@ export default function GenerationSelectionModal({
   settings,
   onSettingsChange,
   product,
+  alreadyQueued = false,
 }: {
   products: Product[];
   batches: Batch[];
@@ -106,6 +109,7 @@ export default function GenerationSelectionModal({
   settings: ModelGenerationSettings;
   onSettingsChange: (settings: ModelGenerationSettings) => void;
   product?: Product;
+  alreadyQueued?: boolean;
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -164,10 +168,12 @@ export default function GenerationSelectionModal({
       `${p.sku} ${p.name}`.toLowerCase().includes(term),
     );
   }, [batchProducts, query, selectedSkus]);
+  const missingDimensions = catalogSelected.filter(product => !validGenerationDimensions(productSpecificationsOf(product)));
   const atLimit = catalogSelected.length >= MAX_GENERATION_PRODUCTS;
   const allAdded = batchProducts.length > 0 && batchProducts.every((p) => selectedSkus.has(skuIdentity(p)));
   return (
     <Modal
+      embedded
       title={manual ? "Single Product Generation" : "Select Products"}
       subtitle={manual ? undefined : "Choose up to 15 SKUs for your generation batch."}
       headerLeading={onBack && (
@@ -176,8 +182,8 @@ export default function GenerationSelectionModal({
           className="generation-source-back"
           disabled={uploading}
           onClick={onBack}
-          aria-label="Back to upload method"
-          title="Change upload method"
+          aria-label={product ? "Back to product" : "Back to Generation Queue"}
+          title={product ? "Back to product" : "Back to Generation Queue"}
         >
           <ArrowLeft size={16} />
           Back
@@ -296,23 +302,24 @@ export default function GenerationSelectionModal({
             <h3>Generation settings</h3>
             <GenerationSettingsFields value={settings} onChange={onSettingsChange} />
           </section>
+          {!manual && missingDimensions.length > 0 && <p className="generation-upload-error" role="alert">Add length, width, height and dimension unit in product details before generation: {missingDimensions.map(product => product.name).join(", ")}.</p>}
           <CreditSummary count={manual ? (imageCount ? 1 : 0) : catalogSelected.length} perProduct={generationCredits(settings)} />
         </section>
       </div>
       <footer className="generation-selection-footer">
         <span>{generationCredits(settings)} credits per SKU</span>
-        <button
+        {!alreadyQueued && <button
           type={manual ? "submit" : "button"}
           form={manual ? "single-generation-upload" : undefined}
           className="button primary"
           disabled={
             uploading ||
-            (manual ? !imageCount : !batch || !catalogSelected.length || catalogSelected.length > MAX_GENERATION_PRODUCTS)
+            (manual ? !imageCount : !batch || !catalogSelected.length || !!missingDimensions.length || catalogSelected.length > MAX_GENERATION_PRODUCTS)
           }
           onClick={manual ? undefined : () => { try { onProceed(); } catch { setUploadError("Settings could not be saved. Please try again."); } }}
         >
           Generate <ArrowRight size={16} />
-        </button>
+        </button>}
       </footer>
     </Modal>
   );

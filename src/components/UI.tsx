@@ -109,6 +109,7 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  embedded = false,
   className = "",
 }: {
   title: string;
@@ -117,10 +118,12 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  embedded?: boolean;
   className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
+    if (embedded) return;
     const el = ref.current;
     const previous = document.activeElement as HTMLElement;
     el?.showModal();
@@ -128,7 +131,19 @@ export function Modal({
       el?.close();
       previous?.focus();
     };
-  }, []);
+  }, [embedded]);
+  const content = <>
+      <header>
+        {headerLeading}
+        <div style={headerLeading ? { flex: 1, minWidth: 0 } : undefined}>
+          <h2>{title}</h2>
+          {subtitle && <p>{subtitle}</p>}
+        </div>
+        <button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={20} /></button>
+      </header>
+      {children}
+    </>;
+  if (embedded) return <section className={`modal generation-embedded ${className}`} aria-label={title}>{content}</section>;
   return (
     <dialog
       ref={ref}
@@ -139,21 +154,7 @@ export function Modal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <header>
-        {headerLeading}
-        <div style={headerLeading ? { flex: 1, minWidth: 0 } : undefined}>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button
-          className="icon-button"
-          onClick={onClose}
-          aria-label="Close dialog"
-        >
-          <X size={20} />
-        </button>
-      </header>
-      {children}
+      {content}
     </dialog>
   );
 }

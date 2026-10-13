@@ -37,7 +37,7 @@ export default function ProductSpecifications({
   product: Product;
   editable: boolean;
   onUpdate: (action: Action) => Promise<void>;
-  onCopy: (value: string) => void;
+  onCopy: (value: string, kind?: "url" | "uid" | "product-url") => void;
 }) {
   const [draft, setDraft] = useState(() => detailsOf(product));
   const [section, setSection] = useState("product");
@@ -105,12 +105,19 @@ export default function ProductSpecifications({
         {section === "product" ? (
           <>
             <div className="spec-fields">
+              <div className="field spec-field-wide">
+                <span>Placement</span>
+                <div className="product-placement-options" role="group" aria-label="Placement">
+                  {(["Floor", "Wall"] as const).map(placement => <button key={placement} type="button" className="button secondary" aria-pressed={(draft.specifications.placement || "Floor") === placement} disabled={locked} onClick={() => spec("placement", placement)}>{placement}</button>)}
+                </div>
+              </div>
               {productInformationFields.map(([key, label]) => (
                 <label className={`field${key === "name" ? " spec-field-wide" : ""}`} key={key}>
                   <span>
                     {label}
                     {key !== "productUrl" && <span className="muted"> *</span>}
                   </span>
+                  <div className={key === "productUrl" ? "product-uid-detail" : undefined}>
                   <input
                     value={draft[key]}
                     readOnly={locked}
@@ -120,6 +127,8 @@ export default function ProductSpecifications({
                       setDraft({ ...draft, [key]: e.target.value });
                     }}
                   />
+                  {key === "productUrl" && <button type="button" className="icon-button" aria-label="Copy Product URL" title="Copy Product URL" disabled={!draft.productUrl.trim()} onClick={() => onCopy(draft.productUrl.trim(), "product-url")}><Copy size={16} /></button>}
+                  </div>
                 </label>
               ))}
               <div className="field">
@@ -131,7 +140,7 @@ export default function ProductSpecifications({
                     className="icon-button"
                     aria-label="Copy Product UID"
                     title="Copy Product UID"
-                    onClick={() => onCopy(product.id)}
+                    onClick={() => onCopy(product.id, "uid")}
                   >
                     <Copy size={16} />
                   </button>

@@ -1,3 +1,4 @@
+import { validGenerationDimensions } from "../lib/generationDimensions";
 import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Plus, X } from "lucide-react";
 import ThemedSelect from "./ThemedSelect";
@@ -54,6 +55,7 @@ export default function ManualProductUpload({ busy, onUpload, formId, hideSubmit
   return <form id={formId} className="generation-manual-upload" onSubmit={async event => {
     event.preventDefault();
     if (!images.length || busy || loading) return;
+    if (!validGenerationDimensions(dimensions)) { setError("Enter length, width, height and dimension unit before generation. Dimensions must be greater than zero."); return; }
     const files = images.map(image => image.file);
     if (await onUpload([{ file: files[0], files, name: details.name, sku: details.sku,
       productUid: details.productUid, brand: details.brand, category: details.category, productUrl: details.productUrl, specifications: { ...specifications, barcode: details.barcode }, dimensions }])) {
@@ -115,10 +117,10 @@ export default function ManualProductUpload({ busy, onUpload, formId, hideSubmit
           onChange={event => setDetails({ ...details, barcode: event.target.value })} /></label>
         {specificationFields.map(({ key, label, placeholder, choices }) => {
           if (key !== "length" && key !== "width" && key !== "height" && key !== "unit") return null;
-          return <label key={key}>{label}
+          return <label key={key}><span>{label} <span aria-hidden="true">*</span></span>
             {choices ? <ThemedSelect label={label} value={dimensions[key]} options={[{ value: "", label: placeholder }, ...choices.map(value => ({ value, label: value }))]}
               disabled={busy} onChange={value => setDimensions({ ...dimensions, unit: value as ManualDimensions["unit"] })} />
-              : <input type="number" min="0.01" step="any" placeholder={placeholder} value={dimensions[key]}
+              : <input required type="number" min="0.01" step="any" placeholder={placeholder} value={dimensions[key]}
                 onChange={event => setDimensions({ ...dimensions, [key]: event.target.value })} />}
           </label>;
         })}

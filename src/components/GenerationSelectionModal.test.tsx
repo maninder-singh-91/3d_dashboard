@@ -19,8 +19,11 @@ it("does not show stale selections or enable generation before a batch is chosen
   const wrongBatch = renderToStaticMarkup(<GenerationSelectionModal {...props} batch="025" />);
   expect(wrongBatch).not.toContain("Previous selection");
   expect(wrongBatch).toContain('class="button primary" disabled=""');
+  const queued = renderToStaticMarkup(<GenerationSelectionModal {...props} batch="024" alreadyQueued />);
+  expect(queued).not.toContain('class="button primary"');
   const withBatch = renderToStaticMarkup(<GenerationSelectionModal {...props} batch="024" />);
   expect(withBatch).toContain('aria-label="Added products"');
   expect(withBatch).toContain("Previous selection");
-  expect(withBatch).not.toContain('class="button primary" disabled=""');
+  expect(withBatch).toContain('class="button primary" disabled=""');
+  expect(withBatch).toContain("Add length, width, height and dimension unit");
 });

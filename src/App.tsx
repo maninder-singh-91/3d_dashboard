@@ -1,3 +1,5 @@
+import { validGenerationDimensions } from "./lib/generationDimensions";
+import { productSpecificationsOf } from "./lib/productSpecifications";
 import {
   lazy,
   Suspense,
@@ -59,7 +61,6 @@ import TaskDetail from "./components/TaskDetail";
 import BatchGeneration from "./components/BatchGeneration";
 import GenerationWorkspace from "./components/GenerationWorkspace";
 import GenerationSelectionModal from "./components/GenerationSelectionModal";
-import GenerationStartModal from "./components/GenerationStartModal";
 import { defaultModelGenerationSettings, loadModelGenerationSettings, saveBatchModelGenerationSettings } from "./lib/modelGenerationSettings";
 import { prepareManualProducts } from "./lib/manualGeneration";
 import GenerationBatch, {
@@ -152,7 +153,6 @@ export default function App({
   );
   const [generationSelectionOpen, setGenerationSelectionOpen] = useState(false);
   const [generationExistingProduct, setGenerationExistingProduct] = useState<Product | undefined>();
-  const [generationStartOpen, setGenerationStartOpen] = useState(false);
   const [generationBatchSettings, setGenerationBatchSettings] = useState({ ...defaultModelGenerationSettings });
   const [generationSource, setGenerationSource] = useState<
     "catalog" | "manual"
@@ -242,6 +242,7 @@ export default function App({
   const notify = (message: string, error = false) =>
     setToast({ message, error });
   function navigate(next: Page, filter: Partial<Filters> = {}) {
+    setGenerationSelectionOpen(false);
     setPublishedProductId(undefined);
     setPage(next);
     setFilters({ ...blankFilters, ...filter });
@@ -297,12 +298,12 @@ export default function App({
       notify((e as Error).message, true);
     }
   }
-  async function copy(value: string, kind: "url" | "uid" = "url") {
+  async function copy(value: string, kind: "url" | "uid" | "product-url" = "url") {
     try {
       await navigator.clipboard.writeText(
         kind === "uid" ? value : new URL(value, location.origin).href,
       );
-      notify(kind === "uid" ? "Product UID copied" : "Model URL copied");
+      notify(kind === "uid" ? "Product UID copied" : kind === "product-url" ? "Product URL copied" : "Model URL copied");
     } catch {
       notify(
         `Clipboard is unavailable. Copy the ${kind === "uid" ? "Product UID" : "URL"} from the task.`,
@@ -694,7 +695,7 @@ export default function App({
                       ).length
                     : 0;
             const isActive =
-              generationSelectionOpen || generationStartOpen
+              generationSelectionOpen
                 ? p === "3D Generation"
                 : page === p;
             return (
@@ -705,8 +706,9 @@ export default function App({
                 className={`nav-item ${isActive ? "active" : ""} ${p === "Team" ? "nav-separated" : ""}`}
                 onClick={() => {
                   if (p === "3D Generation") {
-                    setGenerationStartOpen(true);
-                    setMenuOpen(false);
+                    setGenerationSelectionOpen(false);
+                    generationDispatch({ type: "back" });
+                    navigate("3D Generation");
                   } else navigate(p);
                 }}
               >
@@ -853,7 +855,7 @@ export default function App({
               userId={userId}
               batches={db.batches}
               onBack={() => setSelected(null)}
-              onGenerate={() => {
+              onGenerate={[...(generationFlow.submittedProductIds || []), ...generationFlow.batchProductIds].includes(activeProduct.id) ? undefined : () => {
                 const product = repository.read().products.find(product => product.id === activeProduct.id) || activeProduct;
                 setGenerationExistingProduct(product);
                 setGenerationSource("manual");
@@ -1194,10 +1196,15 @@ export default function App({
                 <>
                   {!generationActive && (
                     <GenerationBatchHeader
-                      count={generationBatch.length}
-                      onBack={() => { generationDispatch({ type: "begin-selection" }); setGenerationSelectionOpen(true); }}
-                      onSelect={() => setGenerationStartOpen(true)}
-                      onListing={() => navigate("Dashboard")}
+                      onBack={() => navigate("Dashboard")}
+                      onSelect={(source) => {
+                        generationDispatch({ type: "begin-selection" });
+                        setGenerationBatchFilter("");
+                        setGenerationSearch("");
+                        setGenerationExistingProduct(undefined);
+                        setGenerationSource(source);
+                        setGenerationSelectionOpen(true);
+                      }}
                     />
                   )}
                   {generationActive ? (
@@ -1223,7 +1230,7 @@ export default function App({
                         })
                       }
                     />
-                  ) : generationBatch.length ? (
+                  ) : (
                     <GenerationBatch
                       products={generationBatch}
                       results={generationFlow.results}
@@ -1232,19 +1239,6 @@ export default function App({
                         generationDispatch({ type: "cancel", id });
                         notify("Queued generation canceled.");
                       }}
-                    />
-                  ) : (
-                    <Empty
-                      title="Select products to begin"
-                      text="Choose up to 15 SKUs for your generation batch."
-                      action={
-                        <button
-                          className="button primary"
-                          onClick={() => setGenerationStartOpen(true)}
-                        >
-                          Select Products
-                        </button>
-                      }
                     />
                   )}
                 </>
@@ -1595,39 +1589,21 @@ export default function App({
           )}
         </main>
       </div>
-      {generationStartOpen && (
-        <GenerationStartModal
-          onQueue={() => {
-            setGenerationStartOpen(false);
-            setGenerationSelectionOpen(false);
-            generationDispatch({ type: "back" });
-            navigate("3D Generation");
-          }}
-          onClose={() => setGenerationStartOpen(false)}
-          onChoose={(source) => {
-            generationDispatch({ type: "begin-selection" });
-            setGenerationBatchFilter("");
-            setGenerationSearch("");
-            setGenerationExistingProduct(undefined);
-            setGenerationSource(source);
-            setGenerationStartOpen(false);
-            setGenerationSelectionOpen(true);
-          }}
-        />
-      )}
       {generationSelectionOpen && (
         <GenerationSelectionModal
           product={generationExistingProduct}
+          alreadyQueued={!!generationExistingProduct && [...(generationFlow.submittedProductIds || []), ...generationFlow.batchProductIds].includes(generationExistingProduct.id)}
           source={generationSource}
           settings={generationBatchSettings}
           onSettingsChange={setGenerationBatchSettings}
           onBack={() => {
             setGenerationSelectionOpen(false);
-            if (!generationExistingProduct) setGenerationStartOpen(true);
           }}
           onUpload={async (files) => {
+            if (files.some(file => !validGenerationDimensions(file.dimensions))) throw Error("Length, width, height and dimension unit are required for generation.");
             if (files.length !== 1) throw Error("Upload images for one product at a time.");
             if (generationExistingProduct) {
+              if ([...(generationFlow.submittedProductIds || []), ...generationFlow.batchProductIds].includes(generationExistingProduct.id)) throw Error("This product is already in the generation queue.");
               const current = repository.read().products.find(product => product.id === generationExistingProduct.id);
               if (!current) throw Error("This product is no longer available.");
               const [prepared] = await prepareManualProducts([{ ...files[0], productUid: current.id, sku: current.sku }],
@@ -1669,6 +1645,7 @@ export default function App({
           onClose={() => setGenerationSelectionOpen(false)}
           onProceed={() => {
             if (!generationSelected.length || (generationSource === "catalog" && !generationBatchFilter)) return;
+            if (generationSource === "catalog" && generationSelected.some(product => !validGenerationDimensions(productSpecificationsOf(product)))) return;
             const batchProducts = products.filter(product => product.batchId === generationBatchFilter);
             if (generationSource === "catalog" && generationSelected.some(product => product.batchId !== generationBatchFilter)) return;
             saveBatchModelGenerationSettings(generationSelected.map(product => product.id), generationBatchSettings);

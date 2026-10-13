@@ -2,6 +2,7 @@ import type { Product, ProductSpecifications } from "./types";
 
 export function productSpecificationsOf(product: Pick<Product, "sku" | "specifications">): ProductSpecifications {
   const specifications: ProductSpecifications = {
+    placement: "Floor",
     barcode: "", storefront: "", length: "", width: "", height: "", unit: "cm",
     color: "", weight: "", usageArea: "", roomType: "", material: "", price: "", currency: "",
     ...product.specifications,

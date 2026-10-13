@@ -46,10 +46,10 @@ export default function TaskDetail({
   userId: string;
   batches: Batch[];
   onBack: () => void;
-  onGenerate: () => void;
+  onGenerate?: () => void;
   onUpdate: (a: Action) => Promise<void>;
   onPublish: () => Promise<void>;
-  onCopy: (value: string, kind?: "url" | "uid") => void;
+  onCopy: (value: string, kind?: "url" | "uid" | "product-url") => void;
 }) {
   const [url, setUrl] = useState(p.modelUrl);
   const [demoPreview, setDemoPreview] = useState(false);
@@ -301,7 +301,7 @@ export default function TaskDetail({
           </section>
           <ProductSpecifications
             product={p}
-            onCopy={(value) => onCopy(value, "uid")}
+            onCopy={(value, kind) => onCopy(value, kind || "uid")}
             editable={role === "Admin / Manager" || editable}
             onUpdate={onUpdate}
           />

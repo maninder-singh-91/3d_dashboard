@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -74,12 +74,36 @@ export default function TodoTaskDetail({
   userId: string;
   batches: Batch[];
   onBack: () => void;
-  onGenerate: () => void;
+  onGenerate?: () => void;
   onUpdate: (action: Action) => Promise<void>;
-  onCopy: (value: string, kind?: "url" | "uid") => void;
+  onCopy: (value: string, kind?: "url" | "uid" | "product-url") => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const thumbnails = useRef<HTMLDivElement>(null);
+  const galleryPanel = useRef<HTMLElement>(null);
+  const settingsColumn = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const gallery = galleryPanel.current;
+    const column = settingsColumn.current;
+    const details = column?.querySelector<HTMLElement>(".product-specifications");
+    const form = details?.querySelector<HTMLFormElement>("form");
+    if (!gallery || !column || !details || !form) return;
+    const alignDetails = () => {
+      if (window.innerWidth <= 980) { form.style.removeProperty("height"); return; }
+      const heading = details.querySelector<HTMLElement>(".product-specifications-heading")?.getBoundingClientRect().height || 0;
+      const generate = column.querySelector<HTMLElement>(".generate-product-button");
+      const extra = generate ? generate.getBoundingClientRect().height + parseFloat(getComputedStyle(column).gap || "0") : 0;
+      const available = gallery.getBoundingClientRect().bottom - details.getBoundingClientRect().top - extra;
+      form.style.height = `${Math.max(120, available - heading - 2)}px`;
+    };
+    const observer = new ResizeObserver(alignDetails);
+    observer.observe(gallery);
+    const status = column.querySelector(".todo-info");
+    if (status) observer.observe(status);
+    window.addEventListener("resize", alignDetails);
+    alignDetails();
+    return () => { observer.disconnect(); window.removeEventListener("resize", alignDetails); form.style.removeProperty("height"); };
+  }, [p.id, p.status, !!onGenerate]);
   const [files, setFiles] = useState<File[]>([]);
   const [localImages, setLocalImages] = useState<string[]>([]);
   const [active, setActive] = useState(0);
@@ -378,6 +402,7 @@ export default function TodoTaskDetail({
       </header>
       <div className="todo-layout">
         <section
+          ref={galleryPanel}
           className="todo-gallery panel"
           aria-label="Product image gallery"
         >
@@ -512,7 +537,7 @@ export default function TodoTaskDetail({
             }}
           />
         </section>
-        <aside className="todo-settings-column">
+        <aside ref={settingsColumn} className="todo-settings-column">
           <section className="todo-info panel" aria-label="Task status">
             <dl>
               <TaskAssignee assigneeId={p.assigneeId} canAssign={role === "Admin / Manager" && !p.singleProductDraft}
@@ -600,14 +625,14 @@ export default function TodoTaskDetail({
             product={p}
             editable={role === "Admin / Manager" || (role === "3D Artist" && (p.singleProductDraft || (p.assigneeId === userId && ["Claimed", "In Progress", "Corrections Required"].includes(p.status))))}
             onUpdate={onUpdate}
-            onCopy={(value) => onCopy(value, "uid")}
+            onCopy={(value, kind) => onCopy(value, kind || "uid")}
           />
-          <button type="button" className="button primary generate-product-button"
+          {onGenerate && <button type="button" className="button primary generate-product-button"
             disabled={locked || !images.length}
             title={!images.length ? "Add product images to generate a model" : undefined}
             onClick={async () => { if (await saveTask()) onGenerate(); }}>
             <Sparkles size={18} /> Generate with AI
-          </button>
+          </button>}
         </aside>
         <RevisionComments saveRef={commentsSave} product={p} role={role} userId={userId} onUpdate={onUpdate} />
       </div>

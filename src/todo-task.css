@@ -556,7 +556,7 @@ main:has(.todo-workspace) {
 .todo-gallery-download-row {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 12px;
   padding-bottom: 0;
 }
 .todo-gallery-download-row .todo-thumbnails {
@@ -568,14 +568,25 @@ main:has(.todo-workspace) {
   justify-content: flex-end;
   align-items: center;
   flex-shrink: 0;
-  padding: 14px 20px 14px 0;
+  padding: 14px 20px 14px 12px;
+}
+.todo-gallery-actions .download-images-button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 12px;
+  gap: 6px;
+  white-space: nowrap;
+}
+.todo-gallery-actions .download-images-button svg {
+  width: 14px;
+  height: 14px;
 }
 .todo-download-images {
   margin: 0;
   flex-shrink: 0;
   white-space: nowrap;
 }
-@media (max-width: 600px) {
+@media (max-width: 800px) {
   .todo-gallery-download-row {
     align-items: stretch;
     flex-direction: column;
@@ -1411,4 +1422,64 @@ main:has(.todo-gallery-workspace) {
 }
 .model-qr-code > span {
   font-size: 12px;
+}
+
+.model-share-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.model-share-bar input { flex: 1; width: 0; min-width: 0; height: 36px; min-height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; box-sizing: border-box; text-overflow: ellipsis; font-size: 14px; }
+.model-share-action { width: 36px; height: 36px; flex-shrink: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: #fff; }
+.model-share-action[aria-expanded="true"] { border-color: #111; color: #111; }
+.model-share-qr-popover { position: absolute; right: 20px; bottom: calc(100% + 10px); width: 260px; padding: 30px 20px 20px; z-index: 5; box-shadow: 0 12px 32px #00000024; }
+.model-share-qr-close { position: absolute; top: 6px; right: 6px; }
+@media (max-width: 600px) { .model-share-bar { padding: 12px; gap: 8px; } .model-share-qr-popover { right: 12px; max-width: calc(100% - 24px); } }
+
+.product-placement-options { display: flex; gap: 8px; }
+.product-placement-options .button { flex: 1; border-radius: 8px; padding: 8px 12px; }
+.product-placement-options .button[aria-pressed="true"] { background: #111; border-color: #111; color: #fff; }
+
+.completed-model-panel {
+  --model-stage-height: clamp(240px, calc(100dvh - 280px), 560px);
+}
+
+.todo-settings-column .todo-info { padding: 16px; }
+.todo-settings-column .todo-info dl { gap: 12px; }
+.todo-settings-column .todo-info dl > .task-assignee { gap: 6px; padding-bottom: 12px; }
+.todo-settings-column .todo-info dl > div:has(.task-status-buttons) { gap: 6px; }
+.todo-settings-column .task-status-buttons { gap: 6px; }
+
+.todo-settings-column .task-status-buttons { flex-wrap: nowrap; gap: 4px; }
+.todo-settings-column .task-status-option { min-height: 28px; padding: 5px 6px; gap: 4px; font-size: 11px; }
+.todo-settings-column .task-status-dot { flex-shrink: 0; width: 3px; height: 3px; }
+
+@media (min-width: 981px) {
+  .todo-settings-column .todo-hold-reason {
+    max-height: clamp(140px, calc(100dvh - 680px), 220px);
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-width: thin;
+    padding-right: 4px;
+  }
+}
+
+@media (min-width: 981px) {
+  .todo-workspace { --task-preview-height: clamp(460px, calc(100dvh - 220px), 760px); }
+  .todo-gallery-workspace .todo-gallery,
+  .completed-workspace .completed-model-panel { height: var(--task-preview-height); box-sizing: border-box; }
+  .todo-gallery-workspace .todo-image-stage { height: auto; min-height: 0; flex: 1; }
+  .todo-gallery-workspace .todo-gallery-download-row { flex-shrink: 0; }
+  .completed-workspace .completed-model-panel { --model-stage-height: calc(var(--task-preview-height) - 67px); }
+}
+
+@media (min-width: 981px) {
+  .todo-gallery-workspace .todo-gallery { display: flex; flex-direction: column; }
+  .todo-gallery-workspace .todo-image-stage { flex: 1 1 0; overflow: hidden; }
+  .todo-gallery-workspace .todo-image-stage > img { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; }
+  .todo-gallery-workspace .todo-gallery-download-row { flex: 0 0 auto; }
 }
